@@ -1,52 +1,89 @@
-import React from 'react';
-import { StyleSheet, View, Text, Image, SafeAreaView, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import React from "react";
+import { View, Text, Image, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
+import { FontAwesome5, Ionicons } from '@expo/vector-icons';
+import { useNavigation, useRouter } from 'expo-router';
 
-const ProfileHeader = () => {
-  const router = useRouter(); // if you want navigation later
-
-  const handleProfilePress = () => {
-    // Example navigation or action
-    router.push('/profile'); 
-  };
+export default function ProfileScreen() {
+  const navigation = useNavigation(); 
+  const router = useRouter();          
 
   return (
-    <SafeAreaView style={styles.container}>
+    <ScrollView style={styles.container}>
+
+      {/* Header */}
       <View style={styles.header}>
-        {/* Menu Icon */}
-        <TouchableOpacity>
-          <Ionicons name="menu" size={28} color="black" />
-        </TouchableOpacity>
-
-        {/* Title */}
-        <Text style={styles.title}>PROFILE</Text>
-
-        {/* Right Side Icons */}
-        <View style={styles.rightIcons}>
-          <TouchableOpacity style={styles.icon}>
-            <Ionicons name="chatbubble-outline" size={24} color="black" />
+        <View style={styles.leftHeader}>
+          <TouchableOpacity onPress={() => navigation.openDrawer()}>
+            <FontAwesome5 name="bars" size={24} color="black" />
           </TouchableOpacity>
-
-          <TouchableOpacity style={styles.icon}>
+          <Text style={styles.headerTitle}>Profile</Text>
+        </View>
+        <View style={styles.iconContainer}>
+          <TouchableOpacity style={styles.iconButton} onPress={() => router.push("/messages")}>
+            <Ionicons name="chatbox-ellipses-outline" size={24} color="black" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton}>
             <Ionicons name="notifications-outline" size={24} color="black" />
           </TouchableOpacity>
-
-          <TouchableOpacity onPress={handleProfilePress}>
+          <TouchableOpacity style={styles.profileButton}>
             <Image
-              source={{ uri: 'https://via.placeholder.com/40' }} // replace with your profile image
-              style={styles.avatar}
+              source={require('../../assets/RonProfile.jpeg')}
+              style={styles.profilePic}
             />
           </TouchableOpacity>
         </View>
       </View>
-    </SafeAreaView>
+
+      {/* Profile Section */}
+      <View style={styles.profileSection}>
+        <Image
+          source={require('../../assets/RonProfile.jpeg')}
+          style={styles.avatar}
+        />
+        <Text style={styles.name}>Ron Iverson</Text>
+        <Text style={styles.detail}>Gender: Male</Text>
+        <Text style={styles.detail}>
+          Address: Brgy. Bagong Bayan Rizaliana Mauban Quezon
+        </Text>
+        <Text style={styles.detail}>
+          Bio: "Love never fails." - 1 Corinthians 13:8
+        </Text>
+
+        {/* Buttons */}
+        <View style={styles.buttonRow}>
+          <TouchableOpacity style={styles.button}>
+            <Text style={styles.buttonText}>Follow</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.button}>
+            <Text style={styles.buttonText}>Message</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* About Section */}
+      <View style={styles.aboutBox}>
+        <Text style={styles.aboutText}>
+          This sculptor creates thought-provoking works that explore the complex
+          relationship between humanity and technology. Their pieces often
+          incorporate industrial materials and organic forms.
+        </Text>
+      </View>
+
+      {/* Artworks Galleries */}
+      <Text style={styles.sectionTitle}>Artwork Galleries</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.galleryRow}>
+        <Image source={require('../../assets/pic1.jpg')} style={styles.galleryItem} />
+        <Image source={require('../../assets/pic1.jpg')} style={styles.galleryItem} />
+        <Image source={require('../../assets/pic1.jpg')} style={styles.galleryItem} />
+      </ScrollView>
+    </ScrollView>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#fff',
+    flex: 1,
+    backgroundColor: "#fff",
   },
   header: {
     flexDirection: 'row',
@@ -54,30 +91,98 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 15,
     paddingVertical: 10,
-    backgroundColor: '#fff',
-    elevation: 4, // shadow for Android
-    shadowColor: '#000', // shadow for iOS
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    paddingTop: 30,
   },
-  title: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#000',
-  },
-  rightIcons: {
+  leftHeader: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  icon: {
-    marginHorizontal: 5,
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginLeft: 15,
   },
-  avatar: {
+  iconContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  iconButton: {
+    marginLeft: 15,
+  },
+  profileButton: {
+    marginLeft: 15,
+  },
+  profilePic: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    marginLeft: 10,
+  },
+  profileSection: {
+    alignItems: "center",
+    marginTop: 10,
+    padding: 15,
+  },
+  avatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 3,
+    borderColor: "#fff",
+    marginBottom: 10,
+  },
+  name: {
+    fontSize: 20,
+    fontWeight: "bold",
+  },
+  detail: {
+    fontSize: 14,
+    color: "#444",
+    textAlign: "center",
+    marginVertical: 2,
+  },
+  buttonRow: {
+    flexDirection: "row",
+    marginTop: 10,
+  },
+  button: {
+    backgroundColor: "#eee",
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    marginHorizontal: 5,
+  },
+  buttonText: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  aboutBox: {
+    backgroundColor: "#f2f2f2",
+    margin: 15,
+    padding: 15,
+    borderRadius: 10,
+  },
+  aboutText: {
+    fontSize: 14,
+    color: "#333",
+    textAlign: "center",
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginLeft: 15,
+    marginTop: 10,
+  },
+  galleryRow: {
+    flexDirection: "row",
+    margin: 10,
+  },
+  galleryItem: {
+    width: 150,
+    height: 100,
+    borderRadius: 10,
+    marginRight: 10,
   },
 });
 
-export default ProfileHeader;
