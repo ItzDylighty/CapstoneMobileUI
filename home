@@ -1,0 +1,210 @@
+import React from 'react';
+import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, ScrollView, TextInput } from 'react-native';
+import { FontAwesome5, Ionicons, Feather, AntDesign } from '@expo/vector-icons';
+import { useNavigation, useRouter } from 'expo-router'; // Import useNavigation
+
+// This is the main HomeScreen component
+const HomeScreen = () => {
+  const navigation = useNavigation(); // Initialize useNavigation hook
+  const router = useRouter();
+
+  // Your groupmate's post data
+  const posts = [
+    {
+      id: 1,
+      username: 'm/Night Raid/Kcivor',
+      description: 'Vibrant painting of stylized figures in a colorful scene with fruits.',
+      image: require('../../assets/pic1.jpg'), // Updated path
+      avatar: 'https://randomuser.me/api/portraits/men/1.jpg',
+      likes: 334
+    },
+    {
+      id: 2,
+      username: 'm/Night Raid/Rona',
+      description: 'Traditional clothing are depicted working in a stylized field under a sunny sky.',
+      image: require('../../assets/pic1.jpg'), // Updated path
+      avatar: 'https://randomuser.me/api/portraits/women/2.jpg',
+      likes: 100
+    },
+    {
+      id: 3,
+      username: 'm/Mahikana/Melon',
+      description: 'Cubist painting of siging figures with a guitar.',
+      image: require('../../assets/pic1.jpg'), // Updated path
+      avatar: 'https://randomuser.me/api/portraits/men/3.jpg',
+      likes: 143
+    }
+  ];
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.leftHeader}>
+          <TouchableOpacity onPress={() => navigation.openDrawer()}>
+            <FontAwesome5 name="bars" size={24} color="black" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>HOME</Text>
+        </View>
+        <View style={styles.iconContainer}>
+          <TouchableOpacity
+            style={styles.iconButton}
+            onPress={() => router.push('/messages')}
+          >
+            <Ionicons name="chatbox-ellipses-outline" size={24} color="black" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton}>
+            <Ionicons name="notifications-outline" size={24} color="black" />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.profileButton} 
+            onPress={() => router.push("/profile")}   //navigate to profile.js
+          >
+            <Image
+              source={require('../../assets/RonProfile.jpeg')} 
+              style={styles.profilePic}
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Search bar */}
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={22} color="#888" />
+        <TextInput placeholder="Search" style={styles.searchInput} />
+      </View>
+
+      {/* Feed */}
+      <ScrollView style={styles.feed}>
+        {posts.map(post => (
+          <View key={post.id} style={styles.card}>
+            {/* User info */}
+            <View style={styles.userInfo}>
+              <Image source={{ uri: post.avatar }} style={styles.avatar} />
+              <Text style={styles.username}>{post.username}</Text>
+            </View>
+
+            {/* Description */}
+            <Text style={styles.description}>{post.description}</Text>
+
+            {/* Post image */}
+            <Image source={post.image} style={styles.postImage} resizeMode="cover" />
+
+            {/* Actions */}
+            <View style={styles.actions}>
+              <View style={styles.likeContainer}>
+                <AntDesign name="hearto" size={20} color="red" />
+                <Text style={styles.likeText}>{post.likes}</Text>
+              </View>
+              <Feather name="message-circle" size={20} color="#555" />
+            </View>
+          </View>
+        ))}
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    paddingTop: 30,
+  },
+  leftHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginLeft: 15,
+  },
+  iconContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  iconButton: {
+    marginLeft: 15,
+  },
+  profileButton: {
+    marginLeft: 15,
+  },
+  profilePic: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+  },
+  searchContainer: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: '#f2f2f2', 
+    margin: 10, 
+    padding: 8, 
+    borderRadius: 8 
+  },
+  searchInput: { 
+    marginLeft: 8, 
+    flex: 1 
+  },
+  feed: { 
+    paddingHorizontal: 10 
+  },
+  card: { 
+    backgroundColor: 'white', 
+    borderRadius: 10, 
+    padding: 10, 
+    marginBottom: 12, 
+    shadowColor: 'black', 
+    shadowOpacity: 0.09, 
+    shadowRadius: 4, 
+    elevation: 2 
+  },
+  userInfo: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginBottom: 5 
+  },
+  avatar: { 
+    width: 33, 
+    height: 33, 
+    borderRadius: 15, 
+    marginRight: 8 
+  },
+  username: { 
+    fontWeight: 'bold' 
+  },
+  description: { 
+    marginBottom: 8 
+  },
+  postImage: { 
+    width: '100%', 
+    height: 180, 
+    borderRadius: 8 
+  },
+  actions: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginTop: 8 
+  },
+  likeContainer: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginRight: 12 
+  },
+  likeText: { 
+    marginLeft: 4, 
+    color: 'red' 
+  }
+});
+
+export default HomeScreen;
