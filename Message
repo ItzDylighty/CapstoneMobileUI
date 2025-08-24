@@ -1,0 +1,120 @@
+import React from 'react';
+import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, TextInput, ScrollView } from 'react-native';
+import { FontAwesome5, Ionicons } from '@expo/vector-icons';
+import { useNavigation, useRouter } from 'expo-router';
+
+// Chat item component
+const ChatItem = ({ name, lastMessage, imageSource }) => {
+
+  return (
+    <TouchableOpacity style={styles.chatItem}>
+      <Image source={imageSource} style={styles.chatImage} />
+      <View style={styles.chatTextContainer}>
+        <Text style={styles.chatName}>{name}</Text>
+        <Text style={styles.chatLastMessage}>{lastMessage}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+const MessagesScreen = () => {
+  const navigation = useNavigation();
+  const router = useRouter();
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.leftHeader}>
+          <TouchableOpacity onPress={() => navigation.openDrawer()}>
+            <FontAwesome5 name="bars" size={24} color="black" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Message</Text>
+        </View>
+        <View style={styles.iconContainer}>
+          <TouchableOpacity style={styles.iconButton}>
+            <Ionicons name="chatbox-ellipses-outline" size={24} color="black" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton}>
+            <Ionicons name="notifications-outline" size={24} color="black" />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.profileButton} 
+            onPress={() => router.push("/profile")}   //navigate to profile.js
+          >
+          <Image
+            source={require('../../assets/RonProfile.jpeg')} 
+              style={styles.profilePic}
+          />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={20} color="#888" style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search"
+          placeholderTextColor="#888"
+        />
+      </View>
+
+      {/* Chat List */}
+      <ScrollView style={styles.chatList}>
+        <ChatItem
+          name="James Morgan Mcgill"
+          lastMessage="Sige pre"
+          imageSource={require('../../assets/adaptive-icon.png')} // updated path
+        />
+        <ChatItem
+          name="Natsuki Deguchi"
+          lastMessage="Musta u tutuy?"
+          imageSource={require('../../assets/favicon.png')} // updated path
+        />
+        <ChatItem
+          name="Park Shin Hye"
+          lastMessage="Lab u"
+          imageSource={require('../../assets/splash-icon.png')} // updated path
+        />
+        <ChatItem
+          name="Gintoki Sakata"
+          lastMessage="Pa commission po pls"
+          imageSource={require('../../assets/mustry.png')} // updated path
+        />
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff' },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 15, paddingVertical: 10, borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0', paddingTop: 30,
+  },
+  leftHeader: { flexDirection: 'row', alignItems: 'center' },
+  headerTitle: { fontSize: 20, fontWeight: 'bold', marginLeft: 15 },
+  iconContainer: { flexDirection: 'row', alignItems: 'center' },
+  iconButton: { marginLeft: 15 },
+  profileButton: { marginLeft: 15 },
+  profilePic: { width: 30, height: 30, borderRadius: 15 },
+  searchContainer: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0',
+    borderRadius: 20, margin: 15, paddingHorizontal: 10, height: 40,
+  },
+  searchIcon: { marginRight: 10 },
+  searchInput: { flex: 1, fontSize: 16 },
+  chatList: { flex: 1, paddingHorizontal: 15 },
+  chatItem: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 10,
+    borderBottomWidth: 1, borderBottomColor: '#e0e0e0',
+  },
+  chatImage: { width: 50, height: 50, borderRadius: 25, marginRight: 15 },
+  chatTextContainer: { flex: 1 },
+  chatName: { fontSize: 16, fontWeight: 'bold' },
+  chatLastMessage: { fontSize: 14, color: '#888' },
+});
+
+export default MessagesScreen;
