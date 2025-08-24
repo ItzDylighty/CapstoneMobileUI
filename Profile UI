@@ -1,0 +1,83 @@
+import React from 'react';
+import { StyleSheet, View, Text, Image, SafeAreaView, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+
+const ProfileHeader = () => {
+  const router = useRouter(); // if you want navigation later
+
+  const handleProfilePress = () => {
+    // Example navigation or action
+    router.push('/profile'); 
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        {/* Menu Icon */}
+        <TouchableOpacity>
+          <Ionicons name="menu" size={28} color="black" />
+        </TouchableOpacity>
+
+        {/* Title */}
+        <Text style={styles.title}>PROFILE</Text>
+
+        {/* Right Side Icons */}
+        <View style={styles.rightIcons}>
+          <TouchableOpacity style={styles.icon}>
+            <Ionicons name="chatbubble-outline" size={24} color="black" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.icon}>
+            <Ionicons name="notifications-outline" size={24} color="black" />
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={handleProfilePress}>
+            <Image
+              source={{ uri: 'https://via.placeholder.com/40' }} // replace with your profile image
+              style={styles.avatar}
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    backgroundColor: '#fff',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    backgroundColor: '#fff',
+    elevation: 4, // shadow for Android
+    shadowColor: '#000', // shadow for iOS
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  rightIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  icon: {
+    marginHorizontal: 5,
+  },
+  avatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    marginLeft: 10,
+  },
+});
+
+export default ProfileHeader;
