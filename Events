@@ -1,0 +1,129 @@
+// app/(drawer)/events.js
+import React from 'react';
+import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, ScrollView, TextInput } from 'react-native';
+import { FontAwesome5, Ionicons } from '@expo/vector-icons';
+import { useNavigation, useRouter } from 'expo-router';
+
+// Reusable component for each event card
+const EventCard = ({ title, imageSource, date }) => (
+  <View style={styles.eventCard}>
+    <Image source={imageSource} style={styles.eventImage} />
+    <Text style={styles.eventTitle}>{title}</Text>
+    <Text style={styles.eventDate}>{date}</Text>
+  </View>
+);
+
+const EventsScreen = () => {
+  const navigation = useNavigation();
+  const router = useRouter();
+
+  // Sample data for the events
+  const events = [
+    { id: 1, title: 'Art Celebration', date: 'Aug 20, 2025', image: require('../../assets/nat.jpeg') },
+    { id: 2, title: 'Crafted Emotion', date: 'Sep 10, 2025', image: require('../../assets/nat.jpeg') },
+    { id: 3, title: 'Timeless Creation', date: 'Oct 05, 2025', image: require('../../assets/nat.jpeg') },
+    { id: 4, title: 'Itik', date: 'Nov 15, 2025', image: require('../../assets/nat.jpeg') },
+  ];
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.leftHeader}>
+          <TouchableOpacity onPress={() => navigation.openDrawer()}>
+            <FontAwesome5 name="bars" size={24} color="black" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Events</Text>
+        </View>
+        <View style={styles.iconContainer}>
+          <TouchableOpacity
+            style={styles.iconButton}
+            onPress={() => router.push('/messages')}
+          >
+            <Ionicons name="chatbox-ellipses-outline" size={24} color="black" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton}>
+            <Ionicons name="notifications-outline" size={24} color="black" />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.profileButton} 
+            onPress={() => router.push("/profile")}   //navigate to profile.js
+          >
+          <Image
+            source={require('../../assets/RonProfile.jpeg')} 
+            style={styles.profilePic}
+          />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Search bar */}
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={22} color="#888" />
+        <TextInput placeholder="Search" style={styles.searchInput} />
+      </View>
+
+      {/* Event Grid */}
+      <ScrollView style={styles.eventGrid}>
+        <View style={styles.row}>
+          {events.map(event => (
+            <EventCard 
+              key={event.id} 
+              title={event.title} 
+              date={event.date} 
+              imageSource={event.image} 
+            />
+          ))}
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    paddingTop: 30,
+  },
+  leftHeader: { flexDirection: 'row', alignItems: 'center' },
+  headerTitle: { fontSize: 20, fontWeight: 'bold', marginLeft: 15 },
+  iconContainer: { flexDirection: 'row', alignItems: 'center' },
+  iconButton: { marginLeft: 15 },
+  profileButton: { marginLeft: 15 },
+  profilePic: { width: 30, height: 30, borderRadius: 15 },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f2f2f2',
+    margin: 10,
+    padding: 8,
+    borderRadius: 8,
+  },
+  searchInput: { marginLeft: 8, flex: 1 },
+  eventGrid: { padding: 10 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  eventCard: {
+    width: '48%',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  eventImage: { width: 100, height: 100, borderRadius: 10, marginBottom: 10 },
+  eventTitle: { fontWeight: 'bold', textAlign: 'center', marginBottom: 4 },
+  eventDate: { fontSize: 12, color: '#555' },
+});
+
+export default EventsScreen;
