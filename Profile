@@ -52,10 +52,7 @@ export default function ProfileScreen() {
         {/* Buttons */}
         <View style={styles.buttonRow}>
           <TouchableOpacity style={styles.button}>
-            <Text style={styles.buttonText}>Follow</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.button}>
-            <Text style={styles.buttonText}>Message</Text>
+            <Text style={styles.buttonText}>Edit Profile</Text>
           </TouchableOpacity>
         </View>
       </View>
