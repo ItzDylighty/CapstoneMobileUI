@@ -32,7 +32,7 @@ export default function ProfileScreen() {
   const [userNameField, setUserNameField] = useState("");
   const [username, setUsername] = useState("");
   const [sex, setSex] = useState("");
-  const [birthday, setBirthday] = useState(null); // null default
+  const [birthday, setBirthday] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showSexDropdown, setShowSexDropdown] = useState(false);
   const [address, setAddress] = useState("");
@@ -43,12 +43,11 @@ export default function ProfileScreen() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [tempImage, setTempImage] = useState(null);
   const [tempBackgroundImage, setTempBackgroundImage] = useState(null);
+  const formattedDate = birthday ? birthday.toLocaleDateString("en-US") : "";
   const [accessToken, setAccessToken] = useState(null);
   const [refreshToken, setRefreshToken] = useState(null);
 
-  const formattedDate = birthday ? new Date(birthday).toLocaleDateString("en-US") : "";
-
-  // Initialize session tokens and fetch profile
+  // Initialize session and load stored birthday
   useEffect(() => {
     const init = async () => {
       try {
@@ -57,6 +56,13 @@ export default function ProfileScreen() {
         const rt = data?.session?.refresh_token || null;
         setAccessToken(at);
         setRefreshToken(rt);
+
+        // Load saved birthday from AsyncStorage
+        const savedBirthday = await AsyncStorage.getItem("userBirthday");
+        if (savedBirthday) {
+          setBirthday(new Date(savedBirthday));
+        }
+
         if (at && rt) {
           await fetchProfile(at, rt);
         }
@@ -67,6 +73,57 @@ export default function ProfileScreen() {
     init();
   }, []);
 
+  const getAuthHeaders = async () => {
+    try {
+      const keys = [
+        "token",
+        "access_token",
+        "accessToken",
+        "jwt",
+        "authToken",
+        "refresh_token",
+        "refreshToken",
+      ];
+      const pairs = await AsyncStorage.multiGet(keys);
+      const map = Object.fromEntries(pairs);
+      const access =
+        map.token ||
+        map.access_token ||
+        map.accessToken ||
+        map.jwt ||
+        map.authToken;
+      const refresh = map.refresh_token || map.refreshToken;
+      const headers = {};
+      if (access) {
+        headers.Authorization = `Bearer ${access}`;
+        headers["x-access-token"] = access;
+      }
+      if (access || refresh) {
+        const cookieParts = [];
+        if (access) cookieParts.push(`access_token=${access}`);
+        if (refresh) cookieParts.push(`refresh_token=${refresh}`);
+        if (cookieParts.length) headers.Cookie = cookieParts.join("; ");
+      }
+      return headers;
+    } catch (e) {
+      console.warn("Auth header lookup failed:", e);
+      return {};
+    }
+  };
+
+  const getInitials = () => {
+    const parts = [firstName, middleName, lastName].filter(Boolean);
+    let base = parts.join(" ");
+    if (!base && username) base = username;
+    if (!base) return "";
+    const tokens = base.trim().split(/\s+/);
+    const initials = tokens
+      .slice(0, 2)
+      .map((t) => t[0]?.toUpperCase())
+      .join("");
+    return initials || "";
+  };
+
   const fetchProfile = async (at = accessToken, rt = refreshToken) => {
     try {
       const res = await fetch(`${API_BASE}/profile/getProfile`, {
@@ -76,43 +133,40 @@ export default function ProfileScreen() {
           Cookie: `access_token=${at}; refresh_token=${rt}`,
         },
       });
-
       if (!res.ok) {
         const text = await res.text();
         console.warn("getProfile response", { status: res.status, body: text });
         throw new Error(`Failed to fetch profile (${res.status})`);
       }
-
       const data = await res.json();
       const p = data?.profile ?? data;
-
       const resolveUrl = (u) => {
         if (!u) return null;
+        if (typeof u !== "string") return null;
         return u.startsWith("http://") || u.startsWith("https://")
           ? u
           : `${API_ORIGIN}${u.startsWith("/") ? "" : "/"}${u}`;
       };
-
       setFirstName(p.firstName || "");
       setMiddleName(p.middleName || "");
       setLastName(p.lastName || "");
       setUserNameField(p.username || "");
       setUsername(p.username || "");
-      setSex(p.sex || ""); // ✅ Use sex
+      setSex(p.sex || "");
       setAddress(p.address || "");
       setBio(p.bio || "");
       setAbout(p.about || "");
 
-      // ✅ Only set birthday if it exists in backend data
       if (p.birthday) {
-        setBirthday(new Date(p.birthday));
-      } else if (!birthday) {
-        // keep as null (don’t overwrite with today)
-        setBirthday(null);
+        const parsedDate = new Date(p.birthday);
+        setBirthday(parsedDate);
+        await AsyncStorage.setItem("userBirthday", parsedDate.toISOString());
       }
 
-      const avatarUrl = resolveUrl(p.profilePicture);
-      const coverUrl = resolveUrl(p.coverPicture);
+      const rawAvatar = p.profilePicture;
+      const rawCover = p.coverPicture;
+      const avatarUrl = resolveUrl(rawAvatar);
+      const coverUrl = resolveUrl(rawCover);
       setImage(avatarUrl ? { uri: avatarUrl } : null);
       setBackgroundImage(coverUrl ? { uri: coverUrl } : null);
     } catch (err) {
@@ -163,25 +217,34 @@ export default function ProfileScreen() {
       if (tempImage) {
         const filename = tempImage.uri.split("/").pop();
         const match = /\.(\w+)$/.exec(filename);
-        const type = match ? `image/${match[1]}` : "image";
-        formData.append("avatar", { uri: tempImage.uri, name: filename, type });
+        const type = match ? `image/${match[1]}` : `image`;
+        formData.append("avatar", {
+          uri: tempImage.uri,
+          name: filename,
+          type,
+        });
       }
       if (tempBackgroundImage) {
         const filename = tempBackgroundImage.uri.split("/").pop();
         const match = /\.(\w+)$/.exec(filename);
-        const type = match ? `image/${match[1]}` : "image";
-        formData.append("cover", { uri: tempBackgroundImage.uri, name: filename, type });
+        const type = match ? `image/${match[1]}` : `image`;
+        formData.append("cover", {
+          uri: tempBackgroundImage.uri,
+          name: filename,
+          type,
+        });
       }
-
       formData.append("firstName", firstName);
       formData.append("middleName", middleName);
       formData.append("lastName", lastName);
       formData.append("username", userNameField || username);
-      formData.append("sex", sex); // ✅ Send as 'sex'
-      if (birthday) formData.append("birthday", new Date(birthday).toISOString());
+      formData.append("sex", sex);
+      formData.append("birthday", birthday.toISOString());
       formData.append("address", address);
       formData.append("bio", bio);
       formData.append("about", about);
+
+      await AsyncStorage.setItem("userBirthday", birthday.toISOString());
 
       const res = await fetch(`${API_BASE}/profile/updateProfile`, {
         method: "POST",
@@ -190,7 +253,6 @@ export default function ProfileScreen() {
         },
         body: formData,
       });
-
       if (!res.ok) throw new Error("Failed to update profile");
 
       setModalVisible(false);
@@ -205,17 +267,11 @@ export default function ProfileScreen() {
   };
 
   const onChangeDate = (event, selectedDate) => {
-    if (selectedDate) setBirthday(selectedDate);
+    if (selectedDate) {
+      setBirthday(selectedDate);
+      AsyncStorage.setItem("userBirthday", selectedDate.toISOString());
+    }
     if (Platform.OS === "android") setShowDatePicker(false);
-  };
-
-  const getInitials = () => {
-    const parts = [firstName, middleName, lastName].filter(Boolean);
-    let base = parts.join(" ");
-    if (!base && username) base = username;
-    if (!base) return "";
-    const tokens = base.trim().split(/\s+/);
-    return tokens.slice(0, 2).map(t => t[0]?.toUpperCase()).join("");
   };
 
   return (
@@ -225,15 +281,28 @@ export default function ProfileScreen() {
         {backgroundImage ? (
           <Image source={backgroundImage} style={styles.backgroundImage} />
         ) : (
-          <Image source={require("../../assets/pic1.jpg")} style={styles.backgroundImage} />
+          <Image
+            source={require("../../assets/pic1.jpg")}
+            style={styles.backgroundImage}
+          />
         )}
         <View style={styles.avatarContainer}>
           {image ? (
             <Image source={image} style={styles.avatar} />
           ) : (
-            <View style={[styles.avatar, styles.placeholderCircle, { backgroundColor: "#dfe3e8" }]}>
+            <View
+              style={[
+                styles.avatar,
+                styles.placeholderCircle,
+                { backgroundColor: "#dfe3e8" },
+              ]}
+            >
               {getInitials() ? (
-                <Text style={{ fontSize: 32, fontWeight: "bold", color: "#555" }}>{getInitials()}</Text>
+                <Text
+                  style={{ fontSize: 32, fontWeight: "bold", color: "#555" }}
+                >
+                  {getInitials()}
+                </Text>
               ) : (
                 <Icon name="user" size={50} color="#999" />
               )}
@@ -242,7 +311,7 @@ export default function ProfileScreen() {
         </View>
         <Text style={styles.name}>{username || "Username"}</Text>
         <Text style={styles.detail}>Sex: {sex}</Text>
-        <Text style={styles.detail}>Birthday: {formattedDate || "Not set"}</Text>
+        <Text style={styles.detail}>Birthday: {formattedDate}</Text>
         <Text style={styles.detail}>Address: {address}</Text>
         <Text style={styles.detail}>Bio: {bio}</Text>
         <View style={styles.buttonRow}>
@@ -258,12 +327,45 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
       </View>
-
       <View style={styles.aboutBox}>
         <Text style={styles.aboutText}>{about}</Text>
       </View>
+      <Text style={styles.sectionTitle}>Artwork Galleries</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.galleryRow}
+      >
+        {[
+          require("../../assets/pic1.jpg"),
+          require("../../assets/pic1.jpg"),
+          require("../../assets/pic1.jpg"),
+        ].map((img, index) => (
+          <TouchableOpacity key={index} onPress={() => setSelectedImage(img)}>
+            <Image source={img} style={styles.galleryItem} />
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+      <Modal
+        visible={selectedImage !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedImage(null)}
+      >
+        <TouchableOpacity
+          style={styles.fullScreenContainer}
+          onPress={() => setSelectedImage(null)}
+          activeOpacity={1}
+        >
+          <Image
+            source={selectedImage}
+            style={styles.fullScreenImage}
+            resizeMode="contain"
+          />
+        </TouchableOpacity>
+      </Modal>
 
-      {/* Modal for editing */}
+      {/* EDIT PROFILE MODAL */}
       <Modal visible={modalVisible} animationType="fade" transparent>
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.modalOverlay}>
@@ -271,9 +373,11 @@ export default function ProfileScreen() {
               behavior={Platform.OS === "ios" ? "padding" : "height"}
               style={styles.keyboardView}
             >
-              <ScrollView contentContainerStyle={styles.modalBox} keyboardShouldPersistTaps="handled">
+              <ScrollView
+                contentContainerStyle={styles.modalBox}
+                keyboardShouldPersistTaps="handled"
+              >
                 <Text style={styles.modalTitle}>Edit Profile</Text>
-                {/* Avatar */}
                 <TouchableOpacity onPress={pickImage} style={styles.imagePicker}>
                   {tempImage ? (
                     <Image source={tempImage} style={styles.avatarEdit} />
@@ -285,8 +389,10 @@ export default function ProfileScreen() {
                   <Text style={styles.changePhotoText}>Change Photo</Text>
                 </TouchableOpacity>
 
-                {/* Cover */}
-                <TouchableOpacity onPress={pickBackgroundImage} style={styles.imagePicker}>
+                <TouchableOpacity
+                  onPress={pickBackgroundImage}
+                  style={styles.imagePicker}
+                >
                   <View style={styles.backgroundPreviewContainer}>
                     {tempBackgroundImage ? (
                       <Image
@@ -295,27 +401,59 @@ export default function ProfileScreen() {
                         resizeMode="cover"
                       />
                     ) : (
-                      <View style={[styles.backgroundPreviewImage, styles.placeholderCircle]}>
+                      <View
+                        style={[
+                          styles.backgroundPreviewImage,
+                          styles.placeholderCircle,
+                        ]}
+                      >
                         <Icon name="image" size={40} color="#999" />
                       </View>
                     )}
                   </View>
-                  <Text style={styles.changePhotoText}>Change Background Photo</Text>
+                  <Text style={styles.changePhotoText}>
+                    Change Background Photo
+                  </Text>
                 </TouchableOpacity>
 
-                <TextInput style={styles.input} placeholder="First Name" value={firstName} onChangeText={setFirstName} />
-                <TextInput style={styles.input} placeholder="Middle Name" value={middleName} onChangeText={setMiddleName} />
-                <TextInput style={styles.input} placeholder="Last Name" value={lastName} onChangeText={setLastName} />
-                <TextInput style={styles.input} placeholder="Username" value={userNameField} onChangeText={setUserNameField} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="First Name"
+                  placeholderTextColor="#999"
+                  value={firstName}
+                  onChangeText={setFirstName}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Middle Name"
+                  placeholderTextColor="#999"
+                  value={middleName}
+                  onChangeText={setMiddleName}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Last Name"
+                  placeholderTextColor="#999"
+                  value={lastName}
+                  onChangeText={setLastName}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Username"
+                  placeholderTextColor="#999"
+                  value={userNameField}
+                  onChangeText={setUserNameField}
+                />
 
-                {/* Sex dropdown */}
                 <View style={styles.inputContainer}>
                   <TouchableOpacity
                     style={styles.input}
                     onPress={() => setShowSexDropdown(!showSexDropdown)}
                     activeOpacity={0.8}
                   >
-                    <Text style={{ color: sex ? "#000" : "#999" }}>{sex || "Select Sex"}</Text>
+                    <Text style={{ color: sex ? "#000" : "#999" }}>
+                      {sex || "Select Sex"}
+                    </Text>
                     <Icon
                       name={showSexDropdown ? "angle-up" : "angle-down"}
                       size={20}
@@ -341,31 +479,58 @@ export default function ProfileScreen() {
                   )}
                 </View>
 
-                {/* Birthday */}
-                <TouchableOpacity style={styles.input} onPress={() => setShowDatePicker(true)}>
+                <TouchableOpacity
+                  style={styles.input}
+                  onPress={() => setShowDatePicker(true)}
+                >
                   <Text style={{ color: birthday ? "#000" : "#888" }}>
-                    {birthday ? `Birthday: ${formattedDate}` : "Select your birthday"}
+                    {birthday
+                      ? `Birthday: ${formattedDate}`
+                      : "Select your birthday"}
                   </Text>
                 </TouchableOpacity>
                 {showDatePicker && (
-                  <DateTimePicker value={birthday || new Date()} mode="date" display="default" onChange={onChangeDate} />
+                  <DateTimePicker
+                    value={birthday}
+                    mode="date"
+                    display="default"
+                    onChange={onChangeDate}
+                  />
                 )}
 
-                <TextInput style={styles.input} placeholder="Enter your address" value={address} onChangeText={setAddress} />
-                <TextInput style={styles.input} placeholder="Enter your bio" value={bio} onChangeText={setBio} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your address"
+                  placeholderTextColor="#999"
+                  value={address}
+                  onChangeText={setAddress}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your bio"
+                  placeholderTextColor="#999"
+                  value={bio}
+                  onChangeText={setBio}
+                />
                 <TextInput
                   style={[styles.input, { height: 80 }]}
                   placeholder="Write something about yourself"
+                  placeholderTextColor="#999"
                   multiline
                   value={about}
                   onChangeText={setAbout}
                 />
-
                 <View style={styles.modalButtons}>
-                  <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => setModalVisible(false)}
+                  >
                     <Text style={styles.cancelButtonText}>Cancel</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+                  <TouchableOpacity
+                    style={styles.saveButton}
+                    onPress={handleSave}
+                  >
                     <Text style={styles.saveButtonText}>Save</Text>
                   </TouchableOpacity>
                 </View>
@@ -379,16 +544,8 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-  },
-  profileSection: {
-    alignItems: "center",
-    marginTop: 10,
-    padding: 0,
-  },
+  container: { flex: 1, backgroundColor: "#fff" },
+  profileSection: { alignItems: "center", marginTop: 10, padding: 0 },
   backgroundImage: {
     width: "100%",
     height: 150,
@@ -397,11 +554,7 @@ const styles = StyleSheet.create({
     resizeMode: "cover",
     marginBottom: -50,
   },
-  avatarContainer: {
-    position: "relative",
-    top: -50,
-    alignItems: "center",
-  },
+  avatarContainer: { position: "relative", top: -50, alignItems: "center" },
   avatar: {
     width: 100,
     height: 100,
@@ -409,21 +562,9 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: "#fff",
   },
-  name: {
-    fontSize: 20,
-    fontWeight: "bold",
-    marginTop: -30,
-  },
-  detail: {
-    fontSize: 14,
-    color: "#444",
-    textAlign: "center",
-    marginVertical: 2,
-  },
-  buttonRow: {
-    flexDirection: "row",
-    marginTop: 10,
-  },
+  name: { fontSize: 20, fontWeight: "bold", marginTop: -30 },
+  detail: { fontSize: 14, color: "#444", textAlign: "center", marginVertical: 2 },
+  buttonRow: { flexDirection: "row", marginTop: 10 },
   button: {
     backgroundColor: "#eee",
     paddingVertical: 8,
@@ -431,57 +572,31 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginHorizontal: 5,
   },
-  buttonText: {
-    fontSize: 14,
-    fontWeight: "600",
-  },
+  buttonText: { fontSize: 14, fontWeight: "600" },
   aboutBox: {
     backgroundColor: "#f2f2f2",
     margin: 15,
     padding: 15,
     borderRadius: 10,
   },
-  aboutText: {
-    fontSize: 14,
-    color: "black",
-    textAlign: "center",
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    marginLeft: 15,
-    marginTop: 10,
-  },
-  galleryRow: {
-    flexDirection: "row",
-    margin: 10,
-  },
-  galleryItem: {
-    width: 150,
-    height: 100,
-    borderRadius: 10,
-    marginRight: 10,
-  },
+  aboutText: { fontSize: 14, color: "black", textAlign: "center" },
+  sectionTitle: { fontSize: 18, fontWeight: "bold", marginLeft: 15, marginTop: 10 },
+  galleryRow: { flexDirection: "row", margin: 10 },
+  galleryItem: { width: 150, height: 100, borderRadius: 10, marginRight: 10 },
   fullScreenContainer: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.9)",
     justifyContent: "center",
     alignItems: "center",
   },
-  fullScreenImage: {
-    width: "100%",
-    height: "100%",
-  },
+  fullScreenImage: { width: "100%", height: "100%" },
   modalOverlay: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "rgba(0,0,0,0.4)",
   },
-  keyboardView: {
-    flex: 1,
-    width: "100%",
-  },
+  keyboardView: { flex: 1, width: "100%" },
   modalBox: {
     backgroundColor: "#fff",
     padding: 20,
@@ -489,27 +604,10 @@ const styles = StyleSheet.create({
     elevation: 5,
     alignItems: "center",
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    marginTop: 30,
-    marginBottom: 15,
-  },
-  imagePicker: {
-    alignItems: "center",
-    marginVertical: 10,
-  },
-  avatarEdit: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-  },
-  changePhotoText: {
-    textAlign: "center",
-    color: "#007BFF",
-    marginTop: 5,
-    marginBottom: 10,
-  },
+  modalTitle: { fontSize: 18, fontWeight: "bold", marginTop: 30, marginBottom: 15 },
+  imagePicker: { alignItems: "center", marginVertical: 10 },
+  avatarEdit: { width: 90, height: 90, borderRadius: 45 },
+  changePhotoText: { textAlign: "center", color: "#007BFF", marginTop: 5, marginBottom: 10 },
   input: {
     backgroundColor: "#f9f9f9",
     borderWidth: 1,
@@ -519,10 +617,7 @@ const styles = StyleSheet.create({
     marginVertical: 5,
     width: "100%",
   },
-  inputContainer: {
-    width: "100%",
-    position: "relative",
-  },
+  inputContainer: { width: "100%", position: "relative" },
   dropdownList: {
     width: "100%",
     backgroundColor: "#fff",
@@ -539,10 +634,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#eee",
   },
-  dropdownItemText: {
-    fontSize: 16,
-    color: "#000",
-  },
+  dropdownItemText: { fontSize: 16, color: "#000" },
   modalButtons: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -555,20 +647,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 25,
     borderRadius: 20,
   },
-  saveButtonText: {
-    color: "#fff",
-    fontWeight: "bold",
-  },
+  saveButtonText: { color: "#fff", fontWeight: "bold" },
   cancelButton: {
     backgroundColor: "#eee",
     paddingVertical: 8,
     paddingHorizontal: 25,
     borderRadius: 20,
   },
-  cancelButtonText: {
-    color: "black",
-    fontWeight: "bold",
-  },
+  cancelButtonText: { color: "black", fontWeight: "bold" },
   placeholderCircle: {
     backgroundColor: "#f0f0f0",
     justifyContent: "center",
@@ -586,8 +672,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     alignSelf: "center",
   },
-  backgroundPreviewImage: {
-    width: "100%",
-    height: "100%",
-  },
+  backgroundPreviewImage: { width: "100%", height: "100%" },
 });
+
