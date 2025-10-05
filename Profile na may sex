@@ -1,0 +1,333 @@
+import React, { useState, useEffect } from "react";
+import {
+  StyleSheet,
+  View,
+  Text,
+  SafeAreaView,
+  Image,
+  TouchableOpacity,
+  Modal,
+  TextInput,
+  TouchableWithoutFeedback,
+  FlatList,
+  ScrollView,
+  Platform,
+  KeyboardAvoidingView,
+  Keyboard,
+} from "react-native";
+import { Feather, Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
+import DateTimePicker from "@react-native-community/datetimepicker";
+
+const ProfileScreen = ({ API_BASE, accessToken, refreshToken }) => {
+  const [profile, setProfile] = useState({});
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [name, setName] = useState("");
+  const [sex, setSex] = useState("");
+  const [birthday, setBirthday] = useState(null);
+  const [bio, setBio] = useState("");
+  const [profilePic, setProfilePic] = useState(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  const fetchProfile = async (at = accessToken, rt = refreshToken) => {
+    try {
+      const res = await fetch(`${API_BASE}/profile/getProfile`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `access_token=${at}; refresh_token=${rt}`,
+        },
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.warn("getProfile response", { status: res.status, text });
+        return;
+      }
+
+      const data = await res.json();
+      const p = data?.profile ?? data;
+
+      setProfile(p);
+      setName(p.name || "");
+      setSex(p.sex || "");
+      setBio(p.bio || "");
+      if (p.profilePic) setProfilePic(p.profilePic);
+
+      // Fix: only set valid birthday
+      if (p.birthday && !isNaN(new Date(p.birthday).getTime())) {
+        setBirthday(new Date(p.birthday));
+      }
+
+    } catch (err) {
+      console.error("Error fetching profile:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchProfile();
+  }, []);
+
+  const handleSaveProfile = async () => {
+    try {
+      const body = {
+        name,
+        sex,
+        bio,
+        birthday: birthday ? birthday.toISOString() : null,
+        profilePic,
+      };
+
+      const res = await fetch(`${API_BASE}/profile/updateProfile`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `access_token=${accessToken}; refresh_token=${refreshToken}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.warn("updateProfile response", { status: res.status, text });
+        return;
+      }
+
+      const updated = await res.json();
+      setProfile(updated.profile ?? updated);
+      setEditModalVisible(false);
+    } catch (err) {
+      console.error("Error saving profile:", err);
+    }
+  };
+
+  const pickImage = async () => {
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permissionResult.granted) {
+      alert("Permission to access media library is required!");
+      return;
+    }
+
+    const pickerResult = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 1,
+      base64: true,
+    });
+
+    if (!pickerResult.canceled && pickerResult.assets.length > 0) {
+      const base64Image = `data:image/jpeg;base64,${pickerResult.assets[0].base64}`;
+      setProfilePic(base64Image);
+    }
+  };
+
+  const formatDate = (date) => {
+    if (!date) return "";
+    return new Date(date).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView>
+        <View style={styles.profileContainer}>
+          <TouchableOpacity onPress={pickImage}>
+            <Image
+              source={
+                profilePic
+                  ? { uri: profilePic }
+                  : require("../assets/default-avatar.png")
+              }
+              style={styles.profileImage}
+            />
+          </TouchableOpacity>
+
+          <Text style={styles.nameText}>{name || "No Name"}</Text>
+          <Text style={styles.infoText}>{sex || "Not specified"}</Text>
+          <Text style={styles.infoText}>{formatDate(birthday)}</Text>
+          <Text style={styles.bioText}>{bio || "No bio available"}</Text>
+
+          <TouchableOpacity
+            style={styles.editButton}
+            onPress={() => setEditModalVisible(true)}
+          >
+            <Feather name="edit" size={20} color="#fff" />
+            <Text style={styles.editButtonText}>Edit Profile</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Edit Modal */}
+        <Modal visible={editModalVisible} transparent animationType="slide">
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.modalOverlay}>
+              <KeyboardAvoidingView
+                behavior={Platform.OS === "ios" ? "padding" : "height"}
+                style={styles.modalContainer}
+              >
+                <ScrollView contentContainerStyle={styles.modalContent}>
+                  <Text style={styles.modalTitle}>Edit Profile</Text>
+
+                  <TouchableOpacity onPress={pickImage}>
+                    <Image
+                      source={
+                        profilePic
+                          ? { uri: profilePic }
+                          : require("../assets/default-avatar.png")
+                      }
+                      style={styles.modalProfileImage}
+                    />
+                  </TouchableOpacity>
+
+                  <TextInput
+                    placeholder="Name"
+                    value={name}
+                    onChangeText={setName}
+                    style={styles.input}
+                  />
+
+                  <TextInput
+                    placeholder="Sex"
+                    value={sex}
+                    onChangeText={setSex}
+                    style={styles.input}
+                  />
+
+                  <TouchableOpacity
+                    onPress={() => setShowDatePicker(true)}
+                    style={styles.input}
+                  >
+                    <Text>
+                      {birthday ? formatDate(birthday) : "Select Birthday"}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {showDatePicker && (
+                    <DateTimePicker
+                      value={birthday || new Date()}
+                      mode="date"
+                      display="default"
+                      onChange={(event, date) => {
+                        setShowDatePicker(false);
+                        if (date) setBirthday(date);
+                      }}
+                    />
+                  )}
+
+                  <TextInput
+                    placeholder="Bio"
+                    value={bio}
+                    onChangeText={setBio}
+                    style={[styles.input, styles.bioInput]}
+                    multiline
+                  />
+
+                  <TouchableOpacity
+                    style={styles.saveButton}
+                    onPress={handleSaveProfile}
+                  >
+                    <Text style={styles.saveButtonText}>Save</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => setEditModalVisible(false)}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                </ScrollView>
+              </KeyboardAvoidingView>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+export default ProfileScreen;
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#fff" },
+  profileContainer: {
+    alignItems: "center",
+    paddingVertical: 30,
+    paddingHorizontal: 16,
+  },
+  profileImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    marginBottom: 15,
+  },
+  nameText: { fontSize: 22, fontWeight: "600", marginBottom: 5 },
+  infoText: { fontSize: 16, color: "#555", marginBottom: 3 },
+  bioText: {
+    fontSize: 15,
+    color: "#666",
+    textAlign: "center",
+    marginVertical: 10,
+  },
+  editButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#1E90FF",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginTop: 10,
+  },
+  editButtonText: {
+    color: "#fff",
+    fontWeight: "600",
+    marginLeft: 6,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+  },
+  modalContainer: {
+    backgroundColor: "#fff",
+    marginHorizontal: 20,
+    borderRadius: 12,
+    padding: 20,
+    maxHeight: "90%",
+  },
+  modalContent: { alignItems: "center" },
+  modalTitle: { fontSize: 20, fontWeight: "700", marginBottom: 15 },
+  modalProfileImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    marginBottom: 15,
+  },
+  input: {
+    width: "100%",
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+  },
+  bioInput: { height: 80, textAlignVertical: "top" },
+  saveButton: {
+    backgroundColor: "#1E90FF",
+    paddingVertical: 12,
+    borderRadius: 10,
+    width: "100%",
+    alignItems: "center",
+    marginTop: 10,
+  },
+  saveButtonText: { color: "#fff", fontWeight: "600", fontSize: 16 },
+  cancelButton: {
+    backgroundColor: "#ccc",
+    paddingVertical: 10,
+    borderRadius: 10,
+    width: "100%",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  cancelButtonText: { color: "#333", fontWeight: "500", fontSize: 15 },
+});
