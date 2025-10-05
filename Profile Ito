@@ -1,0 +1,349 @@
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  StyleSheet,
+  View,
+  Text,
+  SafeAreaView,
+  Image,
+  TouchableOpacity,
+  Modal,
+  TextInput,
+  TouchableWithoutFeedback,
+  FlatList,
+  ScrollView,
+  Platform,
+  KeyboardAvoidingView,
+  Keyboard,
+} from "react-native";
+import { Feather, Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
+import { useFocusEffect } from "@react-navigation/native";
+
+const API_BASE = "http://192.168.18.22:3000/api";
+
+const ProfileScreen = ({ accessToken, refreshToken }) => {
+  const [firstName, setFirstName] = useState("");
+  const [middleName, setMiddleName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [username, setUsername] = useState("");
+  const [userNameField, setUserNameField] = useState("");
+  const [gender, setGender] = useState("");
+  const [address, setAddress] = useState("");
+  const [bio, setBio] = useState("");
+  const [about, setAbout] = useState("");
+  const [birthday, setBirthday] = useState(null);
+  const [image, setImage] = useState(null);
+  const [backgroundImage, setBackgroundImage] = useState(null);
+  const [tempImage, setTempImage] = useState(null);
+  const [tempBackgroundImage, setTempBackgroundImage] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
+
+  // Fetch profile data
+  const fetchProfile = async (at = accessToken, rt = refreshToken) => {
+    try {
+      const res = await fetch(`${API_BASE}/profile/getProfile`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `access_token=${at}; refresh_token=${rt}`,
+        },
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        console.warn("getProfile response", { status: res.status, body: text });
+        throw new Error(`Failed to fetch profile (${res.status})`);
+      }
+      const data = await res.json();
+      const p = data?.profile ?? data;
+      setFirstName(p.firstName || "");
+      setMiddleName(p.middleName || "");
+      setLastName(p.lastName || "");
+      setUserNameField(p.username || "");
+      setUsername(p.username || "");
+      setGender(p.gender || "");
+      setAddress(p.address || "");
+      setBio(p.bio || "");
+      setAbout(p.about || "");
+      if (p.birthday) setBirthday(new Date(p.birthday));
+      setImage(p.avatar ? { uri: p.avatar } : null);
+      setBackgroundImage(p.cover ? { uri: p.cover } : null);
+    } catch (err) {
+      alert("Could not load profile info");
+      console.error(err);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchProfile();
+    }, [])
+  );
+
+  // Pick profile image
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+    });
+    if (!result.canceled) setTempImage({ uri: result.assets[0].uri });
+  };
+
+  // Pick background image
+  const pickBackgroundImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 1,
+    });
+    if (!result.canceled) setTempBackgroundImage({ uri: result.assets[0].uri });
+  };
+
+  // Save profile with backend sync and new photos
+  const handleSave = async () => {
+    try {
+      const formData = new FormData();
+      if (tempImage) {
+        const filename = tempImage.uri.split("/").pop();
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? `image/${match[1]}` : `image`;
+        formData.append("avatar", {
+          uri: tempImage.uri,
+          name: filename,
+          type,
+        });
+      }
+      if (tempBackgroundImage) {
+        const filename = tempBackgroundImage.uri.split("/").pop();
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? `image/${match[1]}` : `image`;
+        formData.append("cover", {
+          uri: tempBackgroundImage.uri,
+          name: filename,
+          type,
+        });
+      }
+      formData.append("firstName", firstName);
+      formData.append("middleName", middleName);
+      formData.append("lastName", lastName);
+      formData.append("username", userNameField);
+      formData.append("gender", gender);
+      formData.append("address", address);
+      formData.append("bio", bio);
+      formData.append("about", about);
+      if (birthday) formData.append("birthday", birthday.toISOString());
+
+      const res = await fetch(`${API_BASE}/profile/updateProfile`, {
+        method: "PUT",
+        headers: {
+          Cookie: `access_token=${accessToken}; refresh_token=${refreshToken}`,
+        },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.warn("updateProfile response", { status: res.status, body: text });
+        throw new Error(`Failed to update profile (${res.status})`);
+      }
+
+      // Refresh data to reflect latest changes
+      await fetchProfile();
+
+      // Reset temporary images
+      setTempImage(null);
+      setTempBackgroundImage(null);
+      setModalVisible(false);
+      alert("Profile updated successfully!");
+    } catch (err) {
+      console.error("Profile update failed:", err);
+      alert("Could not save profile changes");
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContainer}>
+        {/* Background Image */}
+        <TouchableOpacity onPress={pickBackgroundImage}>
+          <Image
+            source={tempBackgroundImage || backgroundImage || require("../assets/default-bg.jpg")}
+            style={styles.backgroundImage}
+          />
+        </TouchableOpacity>
+
+        {/* Profile Section */}
+        <View style={styles.profileSection}>
+          <TouchableOpacity onPress={pickImage}>
+            <Image
+              source={tempImage || image || require("../assets/default-avatar.png")}
+              style={styles.avatar}
+            />
+          </TouchableOpacity>
+          <Text style={styles.name}>
+            {firstName} {lastName}
+          </Text>
+          <Text style={styles.username}>@{username}</Text>
+          <Text style={styles.bio}>{bio}</Text>
+
+          <TouchableOpacity style={styles.editButton} onPress={() => setModalVisible(true)}>
+            <Feather name="edit-3" size={18} color="#fff" />
+            <Text style={styles.editText}>Edit Profile</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+
+      {/* Edit Modal */}
+      <Modal visible={modalVisible} animationType="slide" transparent={true}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.modalContainer}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.modalBox}>
+              <ScrollView>
+                <Text style={styles.modalTitle}>Edit Profile</Text>
+
+                <TextInput
+                  style={styles.input}
+                  value={firstName}
+                  onChangeText={setFirstName}
+                  placeholder="First Name"
+                />
+                <TextInput
+                  style={styles.input}
+                  value={middleName}
+                  onChangeText={setMiddleName}
+                  placeholder="Middle Name"
+                />
+                <TextInput
+                  style={styles.input}
+                  value={lastName}
+                  onChangeText={setLastName}
+                  placeholder="Last Name"
+                />
+                <TextInput
+                  style={styles.input}
+                  value={userNameField}
+                  onChangeText={setUserNameField}
+                  placeholder="Username"
+                />
+                <TextInput
+                  style={styles.input}
+                  value={gender}
+                  onChangeText={setGender}
+                  placeholder="Gender"
+                />
+                <TextInput
+                  style={styles.input}
+                  value={address}
+                  onChangeText={setAddress}
+                  placeholder="Address"
+                />
+                <TextInput
+                  style={styles.input}
+                  value={bio}
+                  onChangeText={setBio}
+                  placeholder="Bio"
+                />
+                <TextInput
+                  style={styles.input}
+                  value={about}
+                  onChangeText={setAbout}
+                  placeholder="About"
+                />
+
+                <View style={styles.modalActions}>
+                  <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+                    <Text style={styles.saveText}>Save</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => setModalVisible(false)}
+                  >
+                    <Text style={styles.cancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </Modal>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#fff" },
+  scrollContainer: { paddingBottom: 40 },
+  backgroundImage: { width: "100%", height: 180, resizeMode: "cover" },
+  profileSection: { alignItems: "center", marginTop: -50 },
+  avatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 3,
+    borderColor: "#fff",
+  },
+  name: { fontSize: 20, fontWeight: "bold", marginTop: 10 },
+  username: { color: "#777", marginBottom: 10 },
+  bio: { color: "#555", textAlign: "center", marginHorizontal: 20 },
+  editButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#007bff",
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    marginTop: 10,
+  },
+  editText: { color: "#fff", marginLeft: 6, fontWeight: "600" },
+  modalContainer: {
+    flex: 1,
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  modalBox: {
+    backgroundColor: "#fff",
+    marginHorizontal: 20,
+    borderRadius: 12,
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 15,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+  },
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 10,
+  },
+  saveButton: {
+    backgroundColor: "#007bff",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+  },
+  saveText: { color: "#fff", fontWeight: "600" },
+  cancelButton: {
+    backgroundColor: "#aaa",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+  },
+  cancelText: { color: "#fff", fontWeight: "600" },
+});
+
+export default ProfileScreen;
+
