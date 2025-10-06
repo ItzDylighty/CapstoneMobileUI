@@ -1,0 +1,749 @@
+import React, { useState, useCallback, useEffect } from "react";
+import { View, Text, Image, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, Platform,
+  KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, } from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import { useFocusEffect } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import Header from "../components/Header";
+import Icon from "react-native-vector-icons/FontAwesome";
+import { supabase } from "../../supabase/supabaseClient";
+
+const API_BASE = "http://192.168.100.83:3000/api";
+const API_ORIGIN = API_BASE.replace(/\/api$/, "");
+
+export default function ProfileScreen() {
+  const [modalVisible, setModalVisible] = useState(false);
+  const [firstName, setFirstName] = useState("");
+  const [middleName, setMiddleName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [userNameField, setUserNameField] = useState("");
+  const [username, setUsername] = useState("");
+  const [sex, setSex] = useState("");
+  const [birthday, setBirthday] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showSexDropdown, setShowSexDropdown] = useState(false);
+  const [address, setAddress] = useState("");
+  const [bio, setBio] = useState("");
+  const [about, setAbout] = useState("");
+  const [image, setImage] = useState(null);
+  const [backgroundImage, setBackgroundImage] = useState(null);
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [tempImage, setTempImage] = useState(null);
+  const [tempBackgroundImage, setTempBackgroundImage] = useState(null);
+  // temp fields for modal editing so Cancel doesn't persist changes
+  const [tempFirstName, setTempFirstName] = useState("");
+  const [tempMiddleName, setTempMiddleName] = useState("");
+  const [tempLastName, setTempLastName] = useState("");
+  const [tempUserNameField, setTempUserNameField] = useState("");
+  const [tempSex, setTempSex] = useState("");
+  const [tempBirthday, setTempBirthday] = useState(new Date());
+  const [tempAddress, setTempAddress] = useState("");
+  const [tempBio, setTempBio] = useState("");
+  const [tempAbout, setTempAbout] = useState("");
+  const formattedDate = birthday
+    ? birthday.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
+    : "";
+  const formattedTempDate = tempBirthday
+    ? tempBirthday.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
+    : "";
+  const [accessToken, setAccessToken] = useState(null);
+  const [refreshToken, setRefreshToken] = useState(null);
+
+
+  const [galleryImages, setGalleryImages] = useState([]);
+  
+  const handleAddImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 1,
+    });
+
+    if (!result.canceled) {
+      const newImage = { uri: result.assets[0].uri };
+      setGalleryImages((prev) => [...prev, newImage]);
+    }
+  };
+
+  // Initialize session and fetch profile
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const at = data?.session?.access_token || null;
+        const rt = data?.session?.refresh_token || null;
+        setAccessToken(at);
+        setRefreshToken(rt);
+
+        if (at && rt) await fetchProfile(at, rt);
+        else await fetchSupabaseProfile();
+      } catch (e) {
+        console.warn("Init session failed:", e?.message || e);
+      }
+    };
+    init();
+  }, []);
+
+  // Fetch from Supabase if API unavailable
+  const fetchSupabaseProfile = async () => {
+    try {
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
+      if (error) throw error;
+      if (!user) return;
+
+      // Fetch profile data from 'profiles' table
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+
+      if (profileError) throw profileError;
+
+      setFirstName(profile.first_name || "");
+      setMiddleName(profile.middle_name || "");
+      setLastName(profile.last_name || "");
+      setUsername(profile.username || "");
+      setUserNameField(profile.username || "");
+      setSex(profile.sex || "");
+      setAddress(profile.address || "");
+      setBio(profile.bio || "");
+      setAbout(profile.about || "");
+
+      if (profile.birthday) {
+        const parsed = new Date(profile.birthday);
+        setBirthday(parsed);
+        await AsyncStorage.setItem("userBirthday", parsed.toISOString());
+      }
+    } catch (err) {
+      console.warn("Supabase profile fetch failed:", err.message);
+    }
+  };
+
+  const getInitials = () => {
+    const parts = [firstName, middleName, lastName].filter(Boolean);
+    let base = parts.join(" ");
+    if (!base && username) base = username;
+    if (!base) return "";
+    const tokens = base.trim().split(/\s+/);
+    return tokens
+      .slice(0, 2)
+      .map((t) => t[0]?.toUpperCase())
+      .join("");
+  };
+
+  const fetchProfile = async (at = accessToken, rt = refreshToken) => {
+    try {
+      const res = await fetch(${API_BASE}/profile/getProfile, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: access_token=${at}; refresh_token=${rt},
+        },
+      });
+      if (!res.ok) throw new Error(Failed to fetch profile (${res.status}));
+
+      const data = await res.json();
+      const p = data?.profile ?? data;
+
+      setFirstName(p.firstName || "");
+      setMiddleName(p.middleName || "");
+      setLastName(p.lastName || "");
+      setUserNameField(p.username || "");
+      setUsername(p.username || "");
+      setSex(p.sex || "");
+      setAddress(p.address || "");
+      setBio(p.bio || "");
+      setAbout(p.about || "");
+
+      // read either 'birthday' or 'birthdate' from backend
+      const fetchedBday = p.birthday || p.birthdate;
+      if (fetchedBday) {
+        const parsedDate = new Date(fetchedBday);
+        setBirthday(parsedDate);
+        await AsyncStorage.setItem("userBirthday", parsedDate.toISOString());
+      }
+
+      const resolveUrl = (u) => {
+        if (!u) return null;
+        return u.startsWith("http") ? u : ${API_ORIGIN}${u};
+      };
+      const avatarUrl = resolveUrl(p.profilePicture);
+      const coverUrl = resolveUrl(p.coverPicture);
+      setImage(avatarUrl ? { uri: avatarUrl } : null);
+      setBackgroundImage(coverUrl ? { uri: coverUrl } : null);
+    } catch (err) {
+      console.warn("Profile fetch failed:", err.message);
+      await fetchSupabaseProfile(); // fallback
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchProfile();
+    }, [])
+  );
+
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+    });
+    if (!result.canceled) {
+      const uri = result.assets[0].uri;
+      const imgObj = { uri };
+      setTempImage(imgObj);
+      setImage(imgObj);
+    }
+  };
+
+  const pickBackgroundImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 1,
+    });
+    if (!result.canceled) {
+      const uri = result.assets[0].uri;
+      const bgObj = { uri };
+      setTempBackgroundImage(bgObj);
+      setBackgroundImage(bgObj);
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      const formData = new FormData();
+      if (tempImage) {
+        const filename = tempImage.uri.split("/").pop();
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? image/${match[1]} : image;
+        formData.append("avatar", {
+          uri: tempImage.uri,
+          name: filename,
+          type,
+        });
+      }
+      if (tempBackgroundImage) {
+        const filename = tempBackgroundImage.uri.split("/").pop();
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? image/${match[1]} : image;
+        formData.append("cover", {
+          uri: tempBackgroundImage.uri,
+          name: filename,
+          type,
+        });
+      }
+
+      // Use temp values for save
+      formData.append("firstName", String(tempFirstName ?? ""));
+      formData.append("middleName", String(tempMiddleName ?? ""));
+      formData.append("lastName", String(tempLastName ?? ""));
+      formData.append("username", String(tempUserNameField || username || ""));
+      formData.append("sex", String(tempSex ?? ""));
+      const birthdayISO = tempBirthday ? new Date(tempBirthday).toISOString() : "";
+      formData.append("birthday", birthdayISO);
+      formData.append("birthdate", birthdayISO);
+      formData.append("address", String(tempAddress ?? ""));
+      formData.append("bio", String(tempBio ?? ""));
+      formData.append("about", String(tempAbout ?? ""));
+
+      if (tempBirthday) {
+        await AsyncStorage.setItem("userBirthday", new Date(tempBirthday).toISOString());
+      }
+
+      const res = await fetch(${API_BASE}/profile/updateProfile, {
+        method: "POST",
+        headers: {
+          Cookie: access_token=${accessToken}; refresh_token=${refreshToken},
+        },
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error("Failed to update profile");
+
+      // Close modal and refresh from server to sync canonical values
+      setModalVisible(false);
+      setTempImage(null);
+      setTempBackgroundImage(null);
+      await fetchProfile();
+
+      alert("Profile updated!");
+    } catch (err) {
+      alert("Failed to save profile information");
+      console.error(err);
+    }
+  };
+
+  // Only mutate tempBirthday in modal; don't persist until Save
+  const onChangeTempDate = (event, selectedDate) => {
+    if (selectedDate) {
+      setTempBirthday(selectedDate);
+    }
+    if (Platform.OS === "android") setShowDatePicker(false);
+  };
+
+  return (
+    <ScrollView style={styles.container}>
+      <Header title="Profile" showSearch={false} />
+      <View style={styles.profileSection}>
+        {backgroundImage ? (
+          <Image source={backgroundImage} style={styles.backgroundImage} />
+        ) : (
+          <Image
+            source={require("../../assets/pic1.jpg")}
+            style={styles.backgroundImage}
+          />
+        )}
+        <View style={styles.avatarContainer}>
+          {image ? (
+            <Image source={image} style={styles.avatar} />
+          ) : (
+            <View
+              style={[
+                styles.avatar,
+                styles.placeholderCircle,
+                { backgroundColor: "#dfe3e8" },
+              ]}
+            >
+              {getInitials() ? (
+                <Text
+                  style={{ fontSize: 32, fontWeight: "bold", color: "#555" }}
+                >
+                  {getInitials()}
+                </Text>
+              ) : (
+                <Icon name="user" size={50} color="#999" />
+              )}
+            </View>
+          )}
+        </View>
+        <Text style={styles.name}>{username || "Username"}</Text>
+        <Text style={styles.detail}>Sex: {sex || "Not set"}</Text>
+        <Text style={styles.detail}>Birthdate: {formattedDate || "Not set"}</Text>
+        <Text style={styles.detail}>Address: {address}</Text>
+        <Text style={styles.detail}>Bio: {bio}</Text>
+        <View style={styles.buttonRow}>
+          <TouchableOpacity
+            style={styles.button}
+            onPress={() => {
+              // initialize temp fields with current values when opening modal
+              setTempImage(image);
+              setTempBackgroundImage(backgroundImage);
+              setTempFirstName(firstName);
+              setTempMiddleName(middleName);
+              setTempLastName(lastName);
+              setTempUserNameField(userNameField || username);
+              setTempSex(sex);
+              setTempBirthday(birthday || new Date());
+              setTempAddress(address);
+              setTempBio(bio);
+              setTempAbout(about);
+              setModalVisible(true);
+            }}
+          >
+            <Text style={styles.buttonText}>Edit Profile</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      
+      
+     {/* Artwork Galleries */}
+      <Text style={styles.sectionTitle}>Artwork Galleries</Text>
+      
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.galleryRow}
+      
+      
+      {/* Display Uploaded Images */}
+      {galleryImages.map((img, index) => (
+        <TouchableOpacity key={index} onPress={() => setSelectedImage(img)}>
+          <Image source={img} style={styles.galleryItem} />
+        </TouchableOpacity>
+      ))}
+      
+      {/* Add Image Button at the end */}
+      <TouchableOpacity style={styles.addImageBox} onPress={handleAddImage}>
+        <Text style={styles.addImageText}>+</Text>
+      </TouchableOpacity>
+      
+      
+      </ScrollView>
+      
+      {/* Fullscreen Image Modal */}
+      <Modal
+        visible={selectedImage !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedImage(null)}
+        <TouchableOpacity
+          style={styles.fullScreenContainer}
+          onPress={() => setSelectedImage(null)}
+          activeOpacity={1}
+        >
+        <Image
+          source={selectedImage}
+          style={styles.fullScreenImage}
+          resizeMode="contain"
+        />
+        </TouchableOpacity>
+      </Modal>
+
+      {/* EDIT PROFILE MODAL */}
+      <Modal visible={modalVisible} animationType="fade" transparent>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+              style={styles.keyboardView}
+            >
+              <ScrollView
+                contentContainerStyle={styles.modalBox}
+                keyboardShouldPersistTaps="handled"
+              >
+                <Text style={styles.modalTitle}>Edit Profile</Text>
+                <TouchableOpacity onPress={pickImage} style={styles.imagePicker}>
+                  {tempImage ? (
+                    <Image source={tempImage} style={styles.avatarEdit} />
+                  ) : (
+                    <View style={[styles.avatarEdit, styles.placeholderCircle]}>
+                      <Icon name="user" size={40} color="#999" />
+                    </View>
+                  )}
+                  <Text style={styles.changePhotoText}>Change Photo</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={pickBackgroundImage}
+                  style={styles.imagePicker}
+                >
+                  <View style={styles.backgroundPreviewContainer}>
+                    {tempBackgroundImage ? (
+                      <Image
+                        source={{ uri: tempBackgroundImage.uri }}
+                        style={styles.backgroundPreviewImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.backgroundPreviewImage,
+                          styles.placeholderCircle,
+                        ]}
+                      >
+                        <Icon name="image" size={40} color="#999" />
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.changePhotoText}>
+                    Change Background Photo
+                  </Text>
+                </TouchableOpacity>
+
+                <TextInput
+                  style={styles.input}
+                  placeholder="First Name"
+                  placeholderTextColor="#999"
+                  value={tempFirstName}
+                  onChangeText={setTempFirstName}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Middle Name"
+                  placeholderTextColor="#999"
+                  value={tempMiddleName}
+                  onChangeText={setTempMiddleName}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Last Name"
+                  placeholderTextColor="#999"
+                  value={tempLastName}
+                  onChangeText={setTempLastName}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Username"
+                  placeholderTextColor="#999"
+                  value={tempUserNameField}
+                  onChangeText={setTempUserNameField}
+                />
+
+                <View style={styles.inputContainer}>
+                  <TouchableOpacity
+                    style={styles.input}
+                    onPress={() => setShowSexDropdown(!showSexDropdown)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={{ color: tempSex ? "#000" : "#999" }}>
+                      {tempSex || "Select Sex"}
+                    </Text>
+                    <Icon
+                      name={showSexDropdown ? "angle-up" : "angle-down"}
+                      size={20}
+                      color="#555"
+                      style={{ position: "absolute", right: 10, top: 12 }}
+                    />
+                  </TouchableOpacity>
+                  {showSexDropdown && (
+                    <View style={styles.dropdownList}>
+                      {['Male', 'Female', 'PreferNotToSay'].map((item) => (
+                        <TouchableOpacity
+                          key={item}
+                          style={styles.dropdownItem}
+                          onPress={() => {
+                            setTempSex(item);
+                            setShowSexDropdown(false);
+                          }}
+                        >
+                          <Text style={styles.dropdownItemText}>{item}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                </View>
+
+                <TouchableOpacity
+                  style={styles.input}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <Text style={{ color: tempBirthday ? "#000" : "#888" }}>
+                    {tempBirthday
+                      ? Birthday: ${formattedTempDate}
+                      : "Select your birthday"}
+                  </Text>
+                </TouchableOpacity>
+                {showDatePicker && (
+                  <DateTimePicker
+                    value={tempBirthday}
+                    mode="date"
+                    display="default"
+                    onChange={onChangeTempDate}
+                  />
+                )}
+
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your address"
+                  placeholderTextColor="#999"
+                  value={tempAddress}
+                  onChangeText={setTempAddress}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your bio"
+                  placeholderTextColor="#999"
+                  value={tempBio}
+                  onChangeText={setTempBio}
+                />
+                <TextInput
+                  style={[styles.input, { height: 80 }]}
+                  placeholder="Write something about yourself"
+                  placeholderTextColor="#999"
+                  multiline
+                  value={tempAbout}
+                  onChangeText={setTempAbout}
+                />
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => setModalVisible(false)}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.saveButton}
+                    onPress={handleSave}
+                  >
+                    <Text style={styles.saveButtonText}>Save</Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </KeyboardAvoidingView>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+    </ScrollView>
+  );
+}
+
+
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#fff" },
+  profileSection: { alignItems: "center", marginTop: 10, padding: 0 },
+  backgroundImage: {
+    width: "100%",
+    height: 150,
+    borderTopLeftRadius: 15,
+    borderTopRightRadius: 15,
+    resizeMode: "cover",
+    marginBottom: -50,
+  },
+  avatarContainer: { position: "relative", top: -50, alignItems: "center" },
+  avatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 3,
+    borderColor: "#fff",
+  },
+  name: { fontSize: 20, fontWeight: "bold", marginTop: -30 },
+  detail: { fontSize: 14, color: "#444", textAlign: "center", marginVertical: 2 },
+  buttonRow: { flexDirection: "row", marginTop: 10 },
+  button: {
+    backgroundColor: "#eee",
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    marginHorizontal: 5,
+  },
+  buttonText: { fontSize: 14, fontWeight: "600" },
+  aboutBox: {
+    backgroundColor: "#f2f2f2",
+    margin: 15,
+    padding: 15,
+    borderRadius: 10,
+  },
+  aboutText: { fontSize: 14, color: "black", textAlign: "center" },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginHorizontal: 15,
+    marginTop: 25
+    marginBottom: 10,
+  },
+  
+  galleryRow: {
+    flexDirection: "row",
+    paddingHorizontal: 10,
+  },
+  
+  galleryItem: {
+    width: 100,
+    height: 100,
+    borderRadius: 10,
+    marginRight: 10,
+  },
+  
+  addImageBox: {
+    width: 100,
+    height: 100,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: "#ccc",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  
+  addImageText: {
+    fontSize: 32,
+    color: "#999",
+  },
+  
+  fullScreenContainer: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.9)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  
+  fullScreenImage: {
+    width: "90%",
+    height: "80%",
+  },
+  
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  keyboardView: { flex: 1, width: "100%" },
+  modalBox: {
+    backgroundColor: "#fff",
+    padding: 20,
+    borderRadius: 15,
+    elevation: 5,
+    alignItems: "center",
+  },
+  modalTitle: { fontSize: 18, fontWeight: "bold", marginTop: 30, marginBottom: 15 },
+  imagePicker: { alignItems: "center", marginVertical: 10 },
+  avatarEdit: { width: 90, height: 90, borderRadius: 45 },
+  changePhotoText: { textAlign: "center", color: "#007BFF", marginTop: 5, marginBottom: 10 },
+  input: {
+    backgroundColor: "#f9f9f9",
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 10,
+    padding: 10,
+    marginVertical: 5,
+    width: "100%",
+  },
+  inputContainer: { width: "100%", position: "relative" },
+  dropdownList: {
+    width: "100%",
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 10,
+    marginTop: -5,
+    elevation: 3,
+    zIndex: 10,
+  },
+  dropdownItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+  dropdownItemText: { fontSize: 16, color: "#000" },
+  modalButtons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 15,
+    width: "100%",
+  },
+  saveButton: {
+    backgroundColor: "black",
+    paddingVertical: 8,
+    paddingHorizontal: 25,
+    borderRadius: 20,
+  },
+  saveButtonText: { color: "#fff", fontWeight: "bold" },
+  cancelButton: {
+    backgroundColor: "#eee",
+    paddingVertical: 8,
+    paddingHorizontal: 25,
+    borderRadius: 20,
+  },
+  cancelButtonText: { color: "black", fontWeight: "bold" },
+  placeholderCircle: {
+    backgroundColor: "#f0f0f0",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#ddd",
+  },
+  backgroundPreviewContainer: {
+    width: 300,
+    height: 100,
+    borderRadius: 10,
+    overflow: "hidden",
+    backgroundColor: "#f0f0f0",
+    justifyContent: "center",
+    alignItems: "center",
+    alignSelf: "center",
+  },
+  backgroundPreviewImage: { width: "100%", height: "100%" },
+});
