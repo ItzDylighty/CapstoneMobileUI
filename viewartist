@@ -1,0 +1,547 @@
+import React, { useState, useCallback, useEffect } from "react";
+import { View, Text, Image, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, Platform, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, Alert } from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import { useFocusEffect } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import Header from "../components/Header";
+import Icon from "react-native-vector-icons/FontAwesome";
+import { supabase } from "../../supabase/supabaseClient";
+const API_BASE = "http://192.168.100.83:3000/api";
+const API_ORIGIN = API_BASE.replace(/\/api$/, "");
+
+export default function ProfileScreen() {
+  const [firstName, setFirstName] = useState("");
+  const [middleName, setMiddleName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [userNameField, setUserNameField] = useState("");
+  const [username, setUsername] = useState("");
+  const [sex, setSex] = useState("");
+  const [birthday, setBirthday] = useState(new Date());
+  const [address, setAddress] = useState("");
+  const [bio, setBio] = useState("");
+  const [about, setAbout] = useState("");
+  const [image, setImage] = useState(null);
+  const [backgroundImage, setBackgroundImage] = useState(null);
+  const [selectedArt, setSelectedArt] = useState(null);
+  const [accessToken, setAccessToken] = useState(null);
+  const [refreshToken, setRefreshToken] = useState(null);
+  const [galleryImages, setGalleryImages] = useState([]);
+  const [role, setRole] = useState(null);
+
+  // Artwork upload modal state
+  const [artModalVisible, setArtModalVisible] = useState(false);
+  const [artImage, setArtImage] = useState(null); // { uri }
+  const [artTitle, setArtTitle] = useState("");
+  const [artDescription, setArtDescription] = useState("");
+  const [artMedium, setArtMedium] = useState("");
+  const [artUploading, setArtUploading] = useState(false);
+
+  // Artwork interactions (likes/comments)
+  const [artComments, setArtComments] = useState([]);
+  const [artLikesCount, setArtLikesCount] = useState(0);
+  const [artUserLiked, setArtUserLiked] = useState(false);
+  const [artNewComment, setArtNewComment] = useState("");
+
+  // Function to upload artwork image to the backend and refresh gallery
+  const uploadArtwork = async (imageUri, meta = {}) => {
+    try {
+      let at = accessToken;
+      let rt = refreshToken;
+      if (!at || !rt) {
+        const { data } = await supabase.auth.getSession();
+        at = data?.session?.access_token || at;
+        rt = data?.session?.refresh_token || rt;
+        if (at) setAccessToken(at);
+        if (rt) setRefreshToken(rt);
+      }
+      const fd = new FormData();
+      fd.append("image", { uri: imageUri, name: "artwork.jpg", type: "image/jpeg" });
+      if (meta.title != null) fd.append("title", String(meta.title));
+      if (meta.description != null) fd.append("description", String(meta.description));
+      if (meta.medium != null) fd.append("medium", String(meta.medium));
+      const res = await fetch(`${API_BASE}/profile/uploadArt`, {
+        method: "POST",
+        headers: { Cookie: `access_token=${at}; refresh_token=${rt}` },
+        body: fd,
+      });
+      if (!res.ok) {
+        let msg = res.statusText;
+        try {
+          const bodyText = await res.text();
+          try {
+            const bodyJson = bodyText ? JSON.parse(bodyText) : null;
+            msg = bodyJson?.error || bodyJson?.message || bodyText || msg;
+          } catch (_) { msg = bodyText || msg; }
+        } catch (_) {}
+        throw new Error(`Upload failed (${res.status}): ${msg}`);
+      }
+      await fetchGallery(at, rt);
+    } catch (err) {
+      alert("Failed to upload artwork");
+    }
+  };
+
+  useEffect(() => {
+    const load = async () => {
+      if (!selectedArt?.id) return;
+      await Promise.all([fetchArtReacts(selectedArt.id), fetchArtComments(selectedArt.id)]);
+    };
+    load();
+  }, [selectedArt]);
+
+  const fetchArtReacts = async (artId) => {
+    try {
+      let at = accessToken, rt = refreshToken;
+      if (!at || !rt) {
+        const { data } = await supabase.auth.getSession();
+        at = data?.session?.access_token || at;
+        rt = data?.session?.refresh_token || rt;
+      }
+      const res = await fetch(`${API_BASE}/profile/getReact?artId=${artId}`, {
+        method: "GET",
+        headers: { Cookie: `access_token=${at}; refresh_token=${rt}` },
+      });
+      if (!res.ok) return;
+      const bodyText = await res.text();
+      let data = null;
+      try { data = bodyText ? JSON.parse(bodyText) : null; } catch { data = null; }
+      const reactions = data?.reactions || [];
+      setArtLikesCount(reactions.length || 0);
+      const session = await supabase.auth.getSession();
+      const uid = session?.data?.session?.user?.id;
+      setArtUserLiked(!!reactions.find(r => r.userId === uid));
+    } catch {}
+  };
+
+  const fetchArtComments = async (artId) => {
+    try {
+      let at = accessToken, rt = refreshToken;
+      if (!at || !rt) {
+        const { data } = await supabase.auth.getSession();
+        at = data?.session?.access_token || at;
+        rt = data?.session?.refresh_token || rt;
+      }
+      const res = await fetch(`${API_BASE}/profile/getComments?artId=${artId}`, {
+        method: "GET",
+        headers: { Cookie: `access_token=${at}; refresh_token=${rt}` },
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      setArtComments(json?.comments || []);
+    } catch {}
+  };
+
+  const handleToggleArtLike = async () => {
+    if (!selectedArt?.id) return;
+    const prevLiked = artUserLiked;
+    const prevCount = artLikesCount;
+    setArtUserLiked(!prevLiked);
+    setArtLikesCount(prevLiked ? Math.max(0, prevCount - 1) : prevCount + 1);
+    try {
+      let at = accessToken, rt = refreshToken;
+      if (!at || !rt) {
+        const { data } = await supabase.auth.getSession();
+        at = data?.session?.access_token || at;
+        rt = data?.session?.refresh_token || rt;
+      }
+      const res = await fetch(`${API_BASE}/profile/createReact`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `access_token=${at}; refresh_token=${rt}`,
+        },
+        body: JSON.stringify({ artId: selectedArt.id }),
+      });
+      if (!res.ok) throw new Error('react failed');
+      await fetchArtReacts(selectedArt.id);
+    } catch {
+      setArtUserLiked(prevLiked);
+      setArtLikesCount(prevCount);
+    }
+  };
+
+  const postArtComment = async () => {
+    if (!selectedArt?.id || !artNewComment.trim()) return;
+    const text = artNewComment.trim();
+    setArtNewComment("");
+    try {
+      let at = accessToken, rt = refreshToken;
+      if (!at || !rt) {
+        const { data } = await supabase.auth.getSession();
+        at = data?.session?.access_token || at;
+        rt = data?.session?.refresh_token || rt;
+      }
+      const res = await fetch(`${API_BASE}/profile/createComment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `access_token=${at}; refresh_token=${rt}`,
+        },
+        body: JSON.stringify({ artId: selectedArt.id, text }),
+      });
+      if (!res.ok) throw new Error('comment failed');
+      await fetchArtComments(selectedArt.id);
+    } catch {}
+  };
+
+  const formattedDate = birthday ? birthday.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }) : "";
+
+  // Only artists/admin can upload artwork
+  const handleAddImage = async () => {
+    const r = String(role || '').toLowerCase();
+    if (!(r === 'artist' || r === 'admin')) {
+      Alert.alert('Not allowed', 'Only artists can upload artworks.');
+      return;
+    }
+    setArtImage(null);
+    setArtTitle("");
+    setArtDescription("");
+    setArtMedium("");
+    setArtModalVisible(true);
+  };
+
+  const pickArtworkImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+    });
+    if (!result.canceled) {
+      setArtImage({ uri: result.assets[0].uri });
+    }
+  };
+
+  const submitArtwork = async () => {
+    try {
+      if (!artImage?.uri) {
+        alert("Please select an artwork image.");
+        return;
+      }
+      setArtUploading(true);
+      await uploadArtwork(artImage.uri, { title: artTitle, description: artDescription, medium: artMedium });
+      setArtModalVisible(false);
+    } finally {
+      setArtUploading(false);
+    }
+  };
+
+  const fetchRole = async (at, rt) => {
+    try {
+      const res = await fetch(`${API_BASE}/users/role`, {
+        method: "GET",
+        credentials: "include",
+        headers: { Cookie: `access_token=${at}; refresh_token=${rt}` },
+      });
+      if (!res.ok) throw new Error(`Failed to fetch role: ${res.status} ${res.statusText}`);
+      const bodyText = await res.text();
+      let data = null;
+      try { data = bodyText ? JSON.parse(bodyText) : null; } catch (_) { data = bodyText; }
+      const resolvedRole = typeof data === "string" ? data : (data?.role || data?.user?.role || data?.data?.role || data?.profile?.role || null);
+      setRole(resolvedRole);
+      return resolvedRole;
+    } catch {
+      setRole(null);
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const at = data?.session?.access_token || null;
+        const rt = data?.session?.refresh_token || null;
+        setAccessToken(at);
+        setRefreshToken(rt);
+        if (at && rt) {
+          const r = await fetchRole(at, rt);
+          await fetchProfile(at, rt);
+          if (String(r || '').toLowerCase() === 'artist' || String(r || '').toLowerCase() === 'admin') {
+            await fetchGallery(at, rt);
+          } else {
+            setGalleryImages([]);
+          }
+        } else {
+          await fetchSupabaseProfile();
+        }
+      } catch {}
+    };
+    init();
+  }, []);
+
+  useEffect(() => {}, [role]); // Optionally keep for debugging
+
+  const fetchSupabaseProfile = async () => {
+    try {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (error) throw error;
+      if (!user) return;
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+      if (profileError) throw profileError;
+      setFirstName(profile.first_name || "");
+      setMiddleName(profile.middle_name || "");
+      setLastName(profile.last_name || "");
+      setUsername(profile.username || "");
+      setUserNameField(profile.username || "");
+      setSex(profile.sex || "");
+      setAddress(profile.address || "");
+      setBio(profile.bio || "");
+      setAbout(profile.about || "");
+      if (profile.birthday) {
+        const parsed = new Date(profile.birthday);
+        setBirthday(parsed);
+        await AsyncStorage.setItem("userBirthday", parsed.toISOString());
+      }
+    } catch {}
+  };
+
+  const getInitials = () => {
+    const parts = [firstName, middleName, lastName].filter(Boolean);
+    let base = parts.join(" ");
+    if (!base && username) base = username;
+    if (!base) return "";
+    const tokens = base.trim().split(/\s+/);
+    return tokens.slice(0, 2).map((t) => t[0]?.toUpperCase()).join("");
+  };
+
+  const fetchProfile = async (at = accessToken, rt = refreshToken) => {
+    try {
+      const res = await fetch(`${API_BASE}/profile/getProfile`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json", Cookie: `access_token=${at}; refresh_token=${rt}` },
+      });
+      if (!res.ok) throw new Error(`Failed to fetch profile (${res.status})`);
+      const data = await res.json();
+      const p = data?.profile ?? data;
+      setFirstName(p.firstName || "");
+      setMiddleName(p.middleName || "");
+      setLastName(p.lastName || "");
+      setUserNameField(p.username || "");
+      setUsername(p.username || "");
+      setSex(p.sex || "");
+      setAddress(p.address || "");
+      setBio(p.bio || "");
+      setAbout(p.about || "");
+      const fetchedBday = p.birthday || p.birthdate;
+      if (fetchedBday) {
+        const parsedDate = new Date(fetchedBday);
+        setBirthday(parsedDate);
+        await AsyncStorage.setItem("userBirthday", parsedDate.toISOString());
+      }
+      const resolveUrl = (u) => {
+        if (!u) return null;
+        return u.startsWith("http") ? u : `${API_ORIGIN}${u}`;
+      };
+      const avatarUrl = resolveUrl(p.profilePicture);
+      const coverUrl = resolveUrl(p.coverPicture);
+      setImage(avatarUrl ? { uri: avatarUrl } : null);
+      setBackgroundImage(coverUrl ? { uri: coverUrl } : null);
+    } catch {
+      await fetchSupabaseProfile();
+    }
+  };
+
+  const fetchGallery = async (at = accessToken, rt = refreshToken) => {
+    try {
+      const res = await fetch(`${API_BASE}/profile/getArts`, {
+        method: "GET",
+        headers: { Cookie: `access_token=${at}; refresh_token=${rt}` },
+      });
+      if (!res.ok) throw new Error(`Failed to fetch gallery (${res.status})`);
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data?.arts || data || []);
+      const items = list.map((a) => {
+        const u = a?.image;
+        const abs = u ? (u.startsWith("http") ? u : `${API_ORIGIN}${u}`) : null;
+        return {
+          id: a?.artId || a?.id || null,
+          image: abs,
+          title: a?.title || null,
+          description: a?.description || null,
+          medium: a?.medium || null,
+          timestamp: a?.timestamp || a?.datePosted || null,
+        };
+      }).filter(x => !!x.image);
+      setGalleryImages(items);
+    } catch {}
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchProfile();
+      const r = String(role || '').toLowerCase();
+      if (accessToken && refreshToken && (r === 'artist' || r === 'admin')) {
+        fetchGallery(accessToken, refreshToken);
+      } else if (accessToken && refreshToken) {
+        setGalleryImages([]);
+      }
+    }, [role, accessToken, refreshToken])
+  );
+
+  return (
+    <ScrollView style={styles.container}>
+      <Header title="Profile" showSearch={false} />
+
+      <View style={styles.profileSection}>
+        {backgroundImage ? (
+          <Image source={backgroundImage} style={styles.backgroundImage} />
+        ) : (
+          <Image source={require("../../assets/pic1.jpg")} style={styles.backgroundImage} />
+        )}
+
+        <View style={styles.avatarContainer}>
+          {image ? (
+            <Image source={image} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, { backgroundColor: "#dfe3e8", justifyContent: 'center', alignItems: 'center' }]}>
+              {getInitials() ? (
+                <Text style={{ fontSize: 32, fontWeight: "bold", color: "#555" }}> {getInitials()} </Text>
+              ) : (
+                <Icon name="user" size={50} color="#999" />
+              )}
+            </View>
+          )}
+        </View>
+        <Text style={styles.name}>{username || "Username"}</Text>
+        <Text style={styles.detail}>Sex: {sex || "Not set"}</Text>
+        <Text style={styles.detail}>Birthdate: {formattedDate || "Not set"}</Text>
+        <Text style={styles.detail}>Address: {address}</Text>
+        <Text style={styles.detail}>Bio: {bio}</Text>
+        <Text style={styles.detail}>About: {about}</Text>
+      </View>
+
+      {(String(role || '').toLowerCase() === 'artist' || String(role || '').toLowerCase() === 'admin') && (
+        <>
+          <Text style={styles.sectionTitle}>Artwork Galleries</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.galleryRow}>
+            {galleryImages.map((art, index) => (
+              <TouchableOpacity key={index} onPress={() => setSelectedArt(art)}>
+                <Image source={{ uri: art.image }} style={styles.galleryItem} />
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={styles.addImageBox} onPress={handleAddImage}>
+              <Text style={styles.addImageText}>+</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </>
+      )}
+
+      <Modal visible={selectedArt !== null} transparent animationType="fade" onRequestClose={() => setSelectedArt(null)}>
+        <TouchableOpacity style={styles.fullScreenContainer} onPress={() => setSelectedArt(null)} activeOpacity={1}>
+          <View style={{ width: '90%', maxHeight: '85%', backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' }}>
+            <ScrollView>
+              {selectedArt?.image && (
+                <Image source={{ uri: selectedArt.image }} style={styles.artModalImage} />
+              )}
+              <View style={{ padding: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                  {!!selectedArt?.title && (
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', flex: 1 }}>{selectedArt.title}</Text>
+                  )}
+                  <TouchableOpacity onPress={handleToggleArtLike} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Icon name={artUserLiked ? 'heart' : 'heart-o'} size={22} color={artUserLiked ? 'red' : '#555'} />
+                    <Text style={{ marginLeft: 6 }}>{artLikesCount}</Text>
+                  </TouchableOpacity>
+                </View>
+                {!!selectedArt?.medium && (<Text style={{ fontSize: 14, color: '#555', marginBottom: 8 }}>Medium: {selectedArt.medium}</Text>)}
+                {!!selectedArt?.description && (<Text style={{ fontSize: 14, color: '#222' }}>{selectedArt.description}</Text>)}
+                {!!selectedArt?.timestamp && (<Text style={{ fontSize: 12, color: '#888', marginTop: 10 }}>{selectedArt.timestamp}</Text>)}
+                <View style={{ height: 1, backgroundColor: '#eee', marginVertical: 10 }} />
+                <ScrollView style={{ maxHeight: 220 }}>
+                  {(artComments || []).map((c) => (
+                    <View key={c.id} style={{ flexDirection: 'row', marginBottom: 10 }}>
+                      <Image source={{ uri: c.user?.avatar }} style={{ width: 32, height: 32, borderRadius: 16, marginRight: 8 }} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontWeight: 'bold' }}>{c.user?.name}</Text>
+                        <Text>{c.text}</Text>
+                        {!!c.timestamp && (<Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{c.timestamp}</Text>)}
+                      </View>
+                    </View>
+                  ))}
+                </ScrollView>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+                  <TextInput style={[styles.input, { flex: 1, marginRight: 8 }]} placeholder="Add a comment..." value={artNewComment} onChangeText={setArtNewComment} />
+                  <TouchableOpacity onPress={postArtComment} style={styles.saveButton}>
+                    <Text style={styles.saveButtonText}>Send</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal visible={artModalVisible} animationType="slide" transparent presentationStyle="overFullScreen" onRequestClose={() => setArtModalVisible(false)}>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.keyboardView}>
+              <ScrollView contentContainerStyle={styles.modalBox} keyboardShouldPersistTaps="handled">
+                <Text style={styles.modalTitle}>Upload Artwork</Text>
+                <TouchableOpacity onPress={pickArtworkImage} style={styles.imagePicker}>
+                  {artImage ? (
+                    <Image source={artImage} style={styles.artworkPreview} />
+                  ) : (
+                    <View style={[styles.artworkPreview, styles.placeholderCircle]}>
+                      <Icon name="image" size={40} color="#999" />
+                    </View>
+                  )}
+                  <Text style={styles.changePhotoText}>Choose Artwork Image</Text>
+                </TouchableOpacity>
+                <TextInput style={styles.input} placeholder="Title (optional)" placeholderTextColor="#999" value={artTitle} onChangeText={setArtTitle} />
+                <TextInput style={[styles.input, { height: 80 }]} placeholder="Description (optional)" placeholderTextColor="#999" value={artDescription} onChangeText={setArtDescription} multiline />
+                <TextInput style={styles.input} placeholder="Medium (e.g., Oil, Digital)" placeholderTextColor="#999" value={artMedium} onChangeText={setArtMedium} />
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity style={styles.cancelButton} onPress={() => setArtModalVisible(false)} disabled={artUploading}>
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.saveButton} onPress={submitArtwork} disabled={artUploading}>
+                    <Text style={styles.saveButtonText}>{artUploading ? "Uploading..." : "Upload"}</Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </KeyboardAvoidingView>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+    </ScrollView>
+  );
+}
+
+// All needed style (removed styles for profile/apply modals and buttons for them)
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#fff" },
+  profileSection: { alignItems: "center", marginTop: 10, padding: 0 },
+  backgroundImage: { width: "100%", height: 150, borderTopLeftRadius: 15, borderTopRightRadius: 15, resizeMode: "cover", marginBottom: -50 },
+  avatarContainer: { position: "relative", top: -50, alignItems: "center" },
+  avatar: { width: 100, height: 100, borderRadius: 50, borderWidth: 3, borderColor: "#fff" },
+  name: { fontSize: 20, fontWeight: "bold", marginTop: -30 },
+  detail: { fontSize: 14, color: "#444", textAlign: "center", marginVertical: 2 },
+  sectionTitle: { fontSize: 18, fontWeight: "bold", marginHorizontal: 15, marginTop: 25, marginBottom: 10 },
+  galleryRow: { flexDirection: "row", paddingHorizontal: 10 },
+  galleryItem: { width: 100, height: 100, borderRadius: 10, marginRight: 10 },
+  artworkPreview: { width: 120, height: 120, borderRadius: 12, backgroundColor: '#f0f0f0' },
+  addImageBox: { width: 100, height: 100, borderRadius: 10, borderWidth: 2, borderColor: "#ccc", alignItems: "center", justifyContent: "center", marginRight: 10 },
+  addImageText: { fontSize: 32, color: "#999" },
+  fullScreenContainer: { flex: 1, backgroundColor: "rgba(0,0,0,0.9)", justifyContent: "center", alignItems: "center" },
+  artModalImage: { width: '100%', height: 260, resizeMode: 'cover', borderWidth: 3, borderColor: '#fff', borderRadius: 10 },
+  // Artwork upload modal (only for artworks, retain styles modalOverlay etc.)
+  modalOverlay: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.4)" },
+  keyboardView: { flex: 1, width: "100%" },
+  modalBox: { backgroundColor: "#fff", padding: 20, borderRadius: 15, elevation: 5, alignItems: "center" },
+  modalTitle: { fontSize: 18, fontWeight: "bold", marginTop: 30, marginBottom: 15 },
+  imagePicker: { alignItems: "center", marginVertical: 10 },
+  placeholderCircle: { backgroundColor: "#f0f0f0", justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: "#ddd" },
+  changePhotoText: { textAlign: "center", color: "#007BFF", marginTop: 5, marginBottom: 10 },
+  input: { backgroundColor: "#f9f9f9", borderWidth: 1, borderColor: "#ccc", borderRadius: 10, padding: 10, marginVertical: 5, width: "100%" },
+  modalButtons: { flexDirection: "row", justifyContent: "space-between", marginTop: 15, width: "100%" },
+  saveButton: { backgroundColor: "black", paddingVertical: 8, paddingHorizontal: 25, borderRadius: 20 },
+  saveButtonText: { color: "#fff", fontWeight: "bold" },
+  cancelButton: { backgroundColor: "#eee", paddingVertical: 8, paddingHorizontal: 25, borderRadius: 20 },
+  cancelButtonText: { color: "black", fontWeight: "bold" }
+});
