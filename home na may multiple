@@ -204,18 +204,27 @@ const HomeScreen = () => {
     if (!postText && pickedImages.length === 0) return;
     const formData = new FormData();
     formData.append("description", postText);
+
+    // ---- FIX: Correct way to append multiple images ----
     pickedImages.forEach((uri, index) => {
       const filename = uri.split("/").pop();
       const match = /\.(\w+)$/.exec(filename);
-      const type = match ? `image/${match[1]}` : `image`;
-      formData.append("media", { uri, name: filename, type });
+      const ext = (match && match[1]?.toLowerCase()) || 'jpg';
+      const type = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'png' ? 'image/png' : `image/${ext}`;
+      formData.append("media", {
+        uri: Platform.OS === 'android' ? uri : uri.replace('file://', ''),
+        name: filename,
+        type,
+      });
     });
+
     try {
       setLoading(true);
       const res = await fetch(`${API_BASE}/homepage/createPost`, {
         method: "POST",
         headers: {
           'Cookie': `access_token=${accessToken}; refresh_token=${refreshToken}`,
+          // Do NOT set Content-Type to multipart/form-data here! Let fetch set it with FormData boundary.
         },
         body: formData,
       });
@@ -319,13 +328,15 @@ const HomeScreen = () => {
       if (tempImage) {
         const filename = tempImage.uri.split("/").pop();
         const match = /\.(\w+)$/.exec(filename);
-        const type = match ? `image/${match[1]}` : `image`;
+        const ext = (match && match[1]?.toLowerCase()) || 'jpg';
+        const type = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'png' ? 'image/png' : `image/${ext}`;
         formData.append("avatar", { uri: tempImage.uri, name: filename, type });
       }
       if (tempBackgroundImage) {
         const filename = tempBackgroundImage.uri.split("/").pop();
         const match = /\.(\w+)$/.exec(filename);
-        const type = match ? `image/${match[1]}` : `image`;
+        const ext = (match && match[1]?.toLowerCase()) || 'jpg';
+        const type = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'png' ? 'image/png' : `image/${ext}`;
         formData.append("cover", { uri: tempBackgroundImage.uri, name: filename, type });
       }
       const birthdayStr = birthday ? new Date(birthday).toISOString() : "";
@@ -836,7 +847,6 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
   likeContainer: { flexDirection: 'row', alignItems: 'center', marginRight: 12 },
   likeText: { marginLeft: 4, color: 'red' },
-  // Fullscreen modal and carousel styling
   fullScreenContainer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
   fullScreenImage: { width: SCREEN_WIDTH, height: "80%" },
   closeModalBtn: {
@@ -851,7 +861,6 @@ const styles = StyleSheet.create({
   commentInputContainer: { flexDirection: 'row', padding: 10, borderTopWidth: 1, borderColor: '#eee' },
   commentInput: { flex: 1, backgroundColor: '#f0f2f5', borderRadius: 20, paddingHorizontal: 12 },
   sendButton: { backgroundColor: 'black', borderRadius: 20, padding: 10, marginLeft: 8 },
-
   modalOverlay: {
     flex: 1,
     justifyContent: "center",
@@ -951,3 +960,4 @@ const styles = StyleSheet.create({
 });
 
 export default HomeScreen;
+
