@@ -14,7 +14,6 @@ import {
   Platform,
   KeyboardAvoidingView,
   Keyboard,
-  Dimensions,
 } from 'react-native';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -23,10 +22,9 @@ import Header from '../components/Header';
 import { supabase } from "../../supabase/supabaseClient";
 import { useRouter } from "expo-router";
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const HomeScreen = () => {
-  const [selectedImages, setSelectedImages] = useState(null); // [{images, index}]
+  const [selectedImage, setSelectedImage] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [postText, setPostText] = useState('');
   const [pickedImages, setPickedImages] = useState([]);
@@ -40,12 +38,17 @@ const HomeScreen = () => {
   const [refreshToken, setRefreshToken] = useState(null);
   const [role, setRole] = useState(null);
 
+
   const [commentModalVisible, setCommentModalVisible] = useState(false);
   const [currentPostComments, setCurrentPostComments] = useState([]);
   const [currentPostId, setCurrentPostId] = useState(null);
   const [newCommentText, setNewCommentText] = useState('');
 
+
+  // Profile modal and fields
   const [profileModalVisible, setProfileModalVisible] = useState(false);
+
+
   const [firstName, setFirstName] = useState("");
   const [middleName, setMiddleName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -61,14 +64,22 @@ const HomeScreen = () => {
   const [image, setImage] = useState(null);
   const [backgroundImage, setBackgroundImage] = useState(null);
 
+
+  // Temporary unsaved edits
   const [tempImage, setTempImage] = useState(null);
   const [tempBackgroundImage, setTempBackgroundImage] = useState(null);
 
+
   const formattedDate = birthday.toLocaleDateString("en-US");
+
+
   const router = useRouter();
   const API_BASE = "http://192.168.18.22:3000/api";
 
-  // Fetch user profile from backend
+
+
+
+  // Fetch user profile from backend to determine if profile modal should show
   const fetchUserProfile = async (at, rt) => {
     try {
       const res = await fetch(`${API_BASE}/profile/getProfile`, {
@@ -78,6 +89,8 @@ const HomeScreen = () => {
         },
       });
       const data = await res.json();
+
+
       if (data?.profile) {
         const p = data.profile;
         setFirstName(p.firstName || "");
@@ -85,50 +98,72 @@ const HomeScreen = () => {
         setLastName(p.lastName || "");
         setUserNameField(p.username || "");
         setUsername(p.username || "");
+        // accept both 'sex' and 'gender' from backend
         setSex(p.sex || p.gender || "");
         setAddress(p.address || "");
         setBio(p.bio || "");
         setAbout(p.about || "");
+        // accept both 'birthday' and 'birthdate'
         if (p.birthday || p.birthdate) setBirthday(new Date(p.birthday || p.birthdate));
+        // Align with profile.js which resolves URLs and may use profilePicture/coverPicture
         const avatarUrl = p.profilePicture || p.avatar;
         const coverUrl = p.coverPicture || p.cover;
         if (avatarUrl) setImage({ uri: avatarUrl });
         if (coverUrl) setBackgroundImage({ uri: coverUrl });
+
+
+        // Only show modal if profile is incomplete (you can tweak the fields checked)
         if (!p.username || !p.firstName || !p.lastName) {
           setProfileModalVisible(true);
         } else {
           setProfileModalVisible(false);
         }
       } else {
+        // No profile data found - require completion
         setProfileModalVisible(true);
       }
     } catch (err) {
+      console.log("fetchUserProfile error:", err?.message || err);
+      // If error occurs, be conservative and show the modal so user can complete profile
       setProfileModalVisible(true);
     }
   };
 
-  // Fetch user role
+  // Fetch user role (concept applied): include credentials and log raw/resolved role
   const fetchRole = async (at, rt) => {
     try {
       const res = await fetch(`${API_BASE}/users/role`, {
         method: "GET",
         credentials: "include",
         headers: {
+          // RN fetch doesn't always handle cookies automatically; include Cookie header
           'Cookie': `access_token=${at}; refresh_token=${rt}`,
         },
       });
       if (!res.ok) throw new Error(`Failed to fetch role: ${res.status} ${res.statusText}`);
+
+      // Read as text first for reliable logging, then try JSON
       const bodyText = await res.text();
+      console.log("[home.js] Fetched role raw:", bodyText);
       let data = null;
-      try { data = bodyText ? JSON.parse(bodyText) : null; } catch (_) { data = bodyText; }
+      try {
+        data = bodyText ? JSON.parse(bodyText) : null;
+      } catch (_) {
+        data = bodyText; // sometimes API returns a plain string role
+      }
+
       const resolvedRole = typeof data === 'string'
         ? data
         : (data?.role || data?.user?.role || data?.data?.role || data?.profile?.role || null);
+
       setRole(resolvedRole);
+      console.log("[home.js] Resolved role:", resolvedRole ?? "(null/unknown)");
     } catch (error) {
+      console.error("[home.js] Error fetching role:", error?.message || error);
       setRole(null);
     }
   };
+
 
   useEffect(() => {
     const init = async () => {
@@ -139,11 +174,15 @@ const HomeScreen = () => {
         const rt = data?.session?.refresh_token || null;
         setAccessToken(at);
         setRefreshToken(rt);
+
+
         if (at && rt) {
+          // Get role and profile when authenticated
           await fetchRole(at, rt);
           await fetchUserProfile(at, rt);
           await fetchPosts(at, rt);
         } else {
+          // no session tokens - still fetch posts (may be public) or skip
           await fetchPosts(at, rt);
         }
       } catch (e) {
@@ -155,38 +194,56 @@ const HomeScreen = () => {
     init();
   }, []);
 
+
   const fetchPosts = async (at = accessToken, rt = refreshToken) => {
     try {
       setLoading(true);
       const session = await supabase.auth.getSession();
       const currentUserId = session?.data?.session?.user?.id;
+
+
       const res = await fetch(`${API_BASE}/homepage/getPost`, {
         method: 'GET',
-        headers: { 'Cookie': `access_token=${at}; refresh_token=${rt}` },
+        headers: {
+          'Cookie': `access_token=${at}; refresh_token=${rt}`,
+        },
       });
       const data = await res.json();
+
+
       setPosts(data.posts || []);
+
+
       const reactCounts = {};
       data.reacts?.forEach(r => {
         reactCounts[r.postId] = (reactCounts[r.postId] || 0) + 1;
       });
       setLikes(reactCounts);
+
+
       const commentCounts = {};
       data.comments?.forEach(c => {
         commentCounts[c.postId] = (commentCounts[c.postId] || 0) + 1;
       });
       setComments(commentCounts);
+
+
       const initialLikes = {};
       data.reacts?.forEach(r => {
-        if (r.userId === currentUserId) { initialLikes[r.postId] = true; }
+        if (r.userId === currentUserId) {
+          initialLikes[r.postId] = true;
+        }
       });
       setUserLikes(initialLikes);
+
+
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
   };
+
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -200,49 +257,73 @@ const HomeScreen = () => {
     }
   };
 
+
   const uploadPost = async () => {
     if (!postText && pickedImages.length === 0) return;
+
     const formData = new FormData();
     formData.append("description", postText);
-
-    // ---- FIX: Correct way to append multiple images ----
     pickedImages.forEach((uri, index) => {
-      const filename = uri.split("/").pop();
+      let fileUri = uri;
+      // Fix for Android and iOS uri schemes to ensure correct prefix
+      if (Platform.OS === "ios" && !uri.startsWith("file://")) {
+        fileUri = "file://" + uri;
+      }
+      // filename and type extraction
+      const filename = fileUri.split("/").pop();
       const match = /\.(\w+)$/.exec(filename);
-      const ext = (match && match[1]?.toLowerCase()) || 'jpg';
-      const type = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'png' ? 'image/png' : `image/${ext}`;
-      formData.append("media", {
-        uri: Platform.OS === 'android' ? uri : uri.replace('file://', ''),
-        name: filename,
-        type,
-      });
+      const type = match ? `image/${match[1]}` : `image`;
+      formData.append("media", { uri: fileUri, name: filename, type });
     });
+
+    // Debug log for form data keys (can't log values directly)
+    console.log("[uploadPost] FormData keys:");
+    for (let pair of formData._parts) {
+      console.log(pair[0], pair[1]?.name || pair[1]);
+    }
 
     try {
       setLoading(true);
       const res = await fetch(`${API_BASE}/homepage/createPost`, {
         method: "POST",
         headers: {
+          // NOTE: do not set Content-Type manually with FormData in fetch; leaving it as-is is correct
           'Cookie': `access_token=${accessToken}; refresh_token=${refreshToken}`,
-          // Do NOT set Content-Type to multipart/form-data here! Let fetch set it with FormData boundary.
         },
         body: formData,
       });
-      await res.json();
+
+      // Additional debug for response status and text
+      if (!res.ok) {
+        const text = await res.text();
+        console.error(`[uploadPost] Failed to upload post: status ${res.status}, response: ${text}`);
+        throw new Error(`Failed to upload post (status ${res.status})`);
+      }
+
+      const data = await res.json();
       setModalVisible(false);
       setPostText("");
       setPickedImages([]);
       fetchPosts();
     } catch (err) {
       setError("Failed to upload post");
+      console.error("[uploadPost] Error:", err.message || err);
     } finally {
       setLoading(false);
     }
   };
 
+
   const handleLike = async (postId) => {
     const alreadyLiked = userLikes[postId] || false;
-    setUserLikes(prev => ({ ...prev, [postId]: !alreadyLiked }));
+
+
+    setUserLikes(prev => ({
+      ...prev,
+      [postId]: !alreadyLiked,
+    }));
+
+
     try {
       const res = await fetch(`${API_BASE}/homepage/createReact`, {
         method: 'POST',
@@ -252,12 +333,19 @@ const HomeScreen = () => {
         },
         body: JSON.stringify({ postId }),
       });
+
+
       if (!res.ok) throw new Error(`Failed to react (${res.status})`);
       await fetchPosts();
     } catch (e) {
-      setUserLikes(prev => ({ ...prev, [postId]: alreadyLiked }));
+      console.error(e.message);
+      setUserLikes(prev => ({
+        ...prev,
+        [postId]: alreadyLiked,
+      }));
     }
   };
+
 
   const openCommentsModal = async (postId) => {
     try {
@@ -277,8 +365,11 @@ const HomeScreen = () => {
     }
   };
 
+
   const postComment = async () => {
     if (!newCommentText.trim()) return;
+
+
     try {
       await fetch(`${API_BASE}/homepage/createComment`, {
         method: 'POST',
@@ -286,17 +377,24 @@ const HomeScreen = () => {
           'Content-Type': 'application/json',
           'Cookie': `access_token=${accessToken}; refresh_token=${refreshToken}`,
         },
-        body: JSON.stringify({ postId: currentPostId, text: newCommentText }),
+        body: JSON.stringify({
+          postId: currentPostId,
+          text: newCommentText,
+        }),
       });
       setNewCommentText('');
-      openCommentsModal(currentPostId);
+      openCommentsModal(currentPostId); // refresh comments
       fetchPosts();
-    } catch (err) {}
+    } catch (err) {
+      console.error(err);
+    }
   };
+
 
   const removeImage = (index) => {
     setPickedImages(prev => prev.filter((_, i) => i !== index));
   };
+
 
   const pickProfileImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -305,10 +403,13 @@ const HomeScreen = () => {
       aspect: [1, 1],
       quality: 1,
     });
+
+
     if (!result.canceled) {
       setTempImage({ uri: result.assets[0].uri });
     }
   };
+
 
   const pickBackgroundImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -317,40 +418,78 @@ const HomeScreen = () => {
       aspect: [16, 9],
       quality: 1,
     });
+
+
     if (!result.canceled) {
       setTempBackgroundImage({ uri: result.assets[0].uri });
     }
   };
 
+
   const saveProfileToDB = async () => {
     try {
       const formData = new FormData();
+
+
       if (tempImage) {
         const filename = tempImage.uri.split("/").pop();
         const match = /\.(\w+)$/.exec(filename);
-        const ext = (match && match[1]?.toLowerCase()) || 'jpg';
-        const type = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'png' ? 'image/png' : `image/${ext}`;
-        formData.append("avatar", { uri: tempImage.uri, name: filename, type });
+        const type = match ? `image/${match[1]}` : `image`;
+        formData.append("avatar", {
+          uri: tempImage.uri,
+          name: filename,
+          type,
+        });
       }
+
+
       if (tempBackgroundImage) {
         const filename = tempBackgroundImage.uri.split("/").pop();
         const match = /\.(\w+)$/.exec(filename);
-        const ext = (match && match[1]?.toLowerCase()) || 'jpg';
-        const type = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'png' ? 'image/png' : `image/${ext}`;
-        formData.append("cover", { uri: tempBackgroundImage.uri, name: filename, type });
+        const type = match ? `image/${match[1]}` : `image`;
+        formData.append("cover", {
+          uri: tempBackgroundImage.uri,
+          name: filename,
+          type,
+        });
       }
+
+
+      // Ensure all fields are appended as strings; send birthday as full ISO (parity with profile.js)
       const birthdayStr = birthday ? new Date(birthday).toISOString() : "";
       formData.append("firstName", String(firstName ?? ""));
       formData.append("middleName", String(middleName ?? ""));
       formData.append("lastName", String(lastName ?? ""));
       formData.append("username", String(userNameField || username || ""));
       formData.append("sex", String(sex ?? ""));
+      // also send under alternate keys for compatibility
       formData.append("gender", String(sex ?? ""));
       formData.append("birthday", birthdayStr);
       formData.append("birthdate", birthdayStr);
       formData.append("address", String(address ?? ""));
       formData.append("bio", String(bio ?? ""));
       formData.append("about", String(about ?? ""));
+
+
+      // Debug summary of what we're about to send (files not included)
+      try {
+        console.log("[home.js] updateProfile payload:", {
+          firstName,
+          middleName,
+          lastName,
+          username: userNameField || username,
+          sex,
+          gender: sex,
+          birthday: birthdayStr,
+          birthdate: birthdayStr,
+          address,
+          bio,
+          about,
+          hasAvatar: !!tempImage,
+          hasCover: !!tempBackgroundImage,
+        });
+      } catch {}
+
       const res = await fetch(`${API_BASE}/profile/updateProfile`, {
         method: "POST",
         headers: {
@@ -358,6 +497,7 @@ const HomeScreen = () => {
         },
         body: formData,
       });
+
       if (!res.ok) {
         let msg = "Failed to save profile";
         try {
@@ -366,25 +506,41 @@ const HomeScreen = () => {
         } catch {}
         throw new Error(msg);
       }
+
+
       alert("Profile saved successfully ");
       return true;
     } catch (err) {
+      console.error(err);
       alert(`Failed to save profile: ${err?.message || "Unknown error"}`);
       return false;
     }
   };
 
+
   const handleProfileSave = async () => {
-    const displayName = userNameField || [firstName, middleName, lastName].filter(Boolean).join(" ");
+    const displayName =
+      userNameField || [firstName, middleName, lastName].filter(Boolean).join(" ");
     setUsername(displayName);
+
+
     setImage(tempImage);
     setBackgroundImage(tempBackgroundImage);
+
+
+    // Save to DB, then refresh profile from server to ensure completeness flag is accurate
     const saved = await saveProfileToDB();
+
+
     if (saved) {
+      // refresh local profile state based on backend response
       await fetchUserProfile(accessToken, refreshToken);
+      // if profile is complete fetchUserProfile will setProfileModalVisible(false)
+      // but ensure it's closed here as well for immediate UX
       setProfileModalVisible(false);
     }
   };
+
 
   const onChangeDate = (event, selectedDate) => {
     if (selectedDate) {
@@ -395,98 +551,49 @@ const HomeScreen = () => {
     }
   };
 
-  // ------- MAIN POST RENDER --------
-  const renderPost = ({ item: post }) => {
-    // Post Images: support both post.images (array) or legacy post.image (single)
-    const postImages = post.images && Array.isArray(post.images) && post.images.length > 0
-      ? post.images
-      : post.image
-        ? [post.image]
-        : [];
-    return (
-      <View key={post.id} style={styles.card}>
-        <View style={styles.userInfo}>
-          <Image source={{ uri: post.user?.avatar }} style={styles.avatar} />
-          <Text style={styles.username}>{post.user?.name}</Text>
-        </View>
-        {!!post.text && <Text style={styles.description}>{post.text}</Text>}
-        {/* Carousel logic */}
-        {postImages.length > 0 && (
-          <FlatList
-            horizontal
-            pagingEnabled
-            data={postImages}
-            keyExtractor={(_, idx) => idx.toString()}
-            showsHorizontalScrollIndicator={false}
-            style={{ marginVertical: 5 }}
-            renderItem={({ item, index }) => (
-              <TouchableOpacity
-                onPress={() => setSelectedImages({ images: postImages, index })}
-                activeOpacity={0.8}
-                style={{ marginRight: 4 }}
-              >
-                <Image
-                  source={{ uri: item }}
-                  style={styles.postImage}
-                  resizeMode="cover"
-                />
-              </TouchableOpacity>
-            )}
-          />
-        )}
-        {!!post.timestamp && (
-          <Text style={styles.timestamp}>{post.timestamp}</Text>
-        )}
-        <View style={styles.actions}>
-          <TouchableOpacity onPress={() => handleLike(post.id)} style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Ionicons
-              name={userLikes[post.id] ? "heart" : "heart-outline"}
-              size={20}
-              color={userLikes[post.id] ? "red" : "#555"}
-            />
-            <Text style={styles.likeText}>{likes[post.id] || 0}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 12 }} onPress={() => openCommentsModal(post.id)}>
-            <Feather name="message-circle" size={20} color="#555" />
-            <Text style={{ marginLeft: 4 }}>{comments[post.id] || 0}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
 
-  // Fullscreen carousel modal for images
-  const renderFullScreenCarousel = () => {
-    if (!selectedImages) return null;
-    return (
-      <Modal visible transparent animationType="fade">
-        <View style={styles.fullScreenContainer}>
-          <FlatList
-            horizontal
-            pagingEnabled
-            initialScrollIndex={selectedImages.index}
-            data={selectedImages.images}
-            keyExtractor={(_, idx) => idx.toString()}
-            showsHorizontalScrollIndicator={false}
-            renderItem={({ item }) => (
-              <Image source={{ uri: item }} style={styles.fullScreenImage} resizeMode="contain" />
-            )}
-            getItemLayout={(_, index) => ({
-              length: SCREEN_WIDTH,
-              offset: SCREEN_WIDTH * index,
-              index,
-            })}
+  const renderPost = ({ item: post }) => (
+    <View key={post.id} style={styles.card}>
+      <View style={styles.userInfo}>
+        <Image source={{ uri: post.user?.avatar }} style={styles.avatar} />
+        <Text style={styles.username}>{post.user?.name}</Text>
+      </View>
+
+
+      {!!post.text && <Text style={styles.description}>{post.text}</Text>}
+
+
+      {!!post.image && (
+        <TouchableOpacity onPress={() => setSelectedImage({ uri: post.image })}>
+          <Image source={{ uri: post.image }} style={styles.postImage} resizeMode="cover" />
+        </TouchableOpacity>
+      )}
+
+
+      {!!post.timestamp && (
+        <Text style={styles.timestamp}>{post.timestamp}</Text>
+      )}
+
+
+      <View style={styles.actions}>
+        <TouchableOpacity onPress={() => handleLike(post.id)} style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Ionicons
+            name={userLikes[post.id] ? "heart" : "heart-outline"}
+            size={20}
+            color={userLikes[post.id] ? "red" : "#555"}
           />
-          <TouchableOpacity
-            style={styles.closeModalBtn}
-            onPress={() => setSelectedImages(null)}
-          >
-            <Ionicons name="close-circle-outline" size={40} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      </Modal>
-    );
-  };
+          <Text style={styles.likeText}>{likes[post.id] || 0}</Text>
+        </TouchableOpacity>
+
+
+        <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 12 }} onPress={() => openCommentsModal(post.id)}>
+          <Feather name="message-circle" size={20} color="#555" />
+          <Text style={{ marginLeft: 4 }}>{comments[post.id] || 0}</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
 
   // Updated render function for comments to include timestamp below each comment
   const renderComment = ({ item }) => (
@@ -495,6 +602,7 @@ const HomeScreen = () => {
       <View style={{ flex: 1 }}>
         <Text style={{ fontWeight: 'bold' }}>{item.user?.name}</Text>
         <Text>{item.text}</Text>
+        {/* Show comment timestamp below comment text */}
         {!!item.timestamp && (
           <Text style={styles.commentTimestamp}>{item.timestamp}</Text>
         )}
@@ -502,16 +610,25 @@ const HomeScreen = () => {
     </View>
   );
 
+
   return (
     <SafeAreaView style={styles.container}>
       <Header title="HOME" showSearch={true} />
+
+
       {error && <Text style={{ color: 'red', margin: 10 }}>{error}</Text>}
+
+
       {(role === "artist" || role === "admin") && (
         <TouchableOpacity style={styles.postOverlayBox} onPress={() => setModalVisible(true)}>
+          {/* Show user's profile avatar if available; fallback keeps same size */}
+  
           <Ionicons name="create-outline" size={24} color="#555" style={{ marginRight: 8 }} />
           <Text style={{ color: '#555' }}>Share inspiration, artwork or a thought</Text>
         </TouchableOpacity>
       )}
+
+
       <FlatList
         data={posts}
         keyExtractor={(item) => item.id.toString()}
@@ -520,8 +637,14 @@ const HomeScreen = () => {
         ListEmptyComponent={loading ? <Text style={{ margin: 12 }}>Loading...</Text> : null}
       />
 
-      {/* Image fullscreen carousel modal */}
-      {renderFullScreenCarousel()}
+
+      {/* Image fullscreen modal */}
+      <Modal visible={selectedImage !== null} transparent animationType="fade">
+        <TouchableOpacity style={styles.fullScreenContainer} onPress={() => setSelectedImage(null)}>
+          <Image source={selectedImage} style={styles.fullScreenImage} resizeMode="contain" />
+        </TouchableOpacity>
+      </Modal>
+
 
       {/* Create Post modal */}
       <Modal visible={modalVisible} transparent animationType="fade">
@@ -531,6 +654,7 @@ const HomeScreen = () => {
               <View style={styles.modalCard}>
                 <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10 }}>Create Post</Text>
                 <View style={styles.modalInputBox}>
+                  {/* Show user's profile avatar if available; fallback keeps same size */}
                   {image ? (
                     <Image source={image} style={styles.avatar} />
                   ) : (
@@ -545,6 +669,8 @@ const HomeScreen = () => {
                     multiline
                   />
                 </View>
+
+
                 <FlatList
                   horizontal
                   data={pickedImages}
@@ -565,6 +691,8 @@ const HomeScreen = () => {
                     </TouchableOpacity>
                   }
                 />
+
+
                 <TouchableOpacity style={styles.postButton} onPress={uploadPost}>
                   <Text style={styles.postButtonText}>Post</Text>
                 </TouchableOpacity>
@@ -573,6 +701,7 @@ const HomeScreen = () => {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
 
       {/* Comments Modal */}
       <Modal visible={commentModalVisible} animationType="slide">
@@ -602,6 +731,7 @@ const HomeScreen = () => {
         </SafeAreaView>
       </Modal>
 
+
       {/* Complete Your Profile Modal */}
       <Modal visible={profileModalVisible} animationType="fade" transparent>
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -615,6 +745,8 @@ const HomeScreen = () => {
                 keyboardShouldPersistTaps="handled"
               >
                 <Text style={styles.modalTitle}>Complete Your Profile</Text>
+
+
                 <TouchableOpacity onPress={pickProfileImage} style={styles.imagePicker}>
                   {tempImage ? (
                     <Image source={tempImage} style={styles.avatarEdit} />
@@ -625,6 +757,8 @@ const HomeScreen = () => {
                   )}
                   <Text style={styles.changePhotoText}>Change Profile Photo</Text>
                 </TouchableOpacity>
+
+
                 <TouchableOpacity onPress={pickBackgroundImage} style={styles.imagePicker}>
                   <View style={styles.backgroundPreviewContainer}>
                     {tempBackgroundImage ? (
@@ -637,6 +771,8 @@ const HomeScreen = () => {
                   </View>
                   <Text style={styles.changePhotoText}>Change Background Photo</Text>
                 </TouchableOpacity>
+
+
                 <TextInput
                   style={styles.input}
                   placeholder="First Name"
@@ -658,6 +794,8 @@ const HomeScreen = () => {
                   value={lastName}
                   onChangeText={setLastName}
                 />
+
+
                 <TextInput
                   style={styles.input}
                   placeholder="Username"
@@ -665,6 +803,8 @@ const HomeScreen = () => {
                   value={userNameField}
                   onChangeText={setUserNameField}
                 />
+
+
                 <View style={styles.inputContainer}>
                   <TouchableOpacity
                     style={styles.input}
@@ -681,6 +821,8 @@ const HomeScreen = () => {
                       style={{ position: "absolute", right: 10, top: 12 }}
                     />
                   </TouchableOpacity>
+
+
                   {showSexDropdown && (
                     <View style={styles.dropdownList}>
                       {["Male", "Female", "PreferNotToSay"].map((item) => (
@@ -698,6 +840,8 @@ const HomeScreen = () => {
                     </View>
                   )}
                 </View>
+
+
                 <TouchableOpacity
                   style={styles.input}
                   onPress={() => setShowDatePicker(true)}
@@ -708,6 +852,8 @@ const HomeScreen = () => {
                       : "Select your birthday"}
                   </Text>
                 </TouchableOpacity>
+
+
                 {showDatePicker && (
                   <DateTimePicker
                     value={birthday}
@@ -716,6 +862,8 @@ const HomeScreen = () => {
                     onChange={onChangeDate}
                   />
                 )}
+
+
                 <TextInput
                   style={styles.input}
                   placeholder="Enter your address"
@@ -738,6 +886,8 @@ const HomeScreen = () => {
                   value={about}
                   onChangeText={setAbout}
                 />
+
+
                 <View style={styles.modalButtons}>
                   <TouchableOpacity
                     style={styles.cancelButton}
@@ -757,6 +907,7 @@ const HomeScreen = () => {
     </SafeAreaView>
   );
 };
+
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
@@ -843,24 +994,23 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 4,
   },
-  postImage: { width: SCREEN_WIDTH - 40, height: 200, borderRadius: 8, marginBottom: 10 },
+  postImage: { width: '100%', height: 180, borderRadius: 8, marginBottom: 10 },
   actions: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
   likeContainer: { flexDirection: 'row', alignItems: 'center', marginRight: 12 },
   likeText: { marginLeft: 4, color: 'red' },
   fullScreenContainer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
-  fullScreenImage: { width: SCREEN_WIDTH, height: "80%" },
-  closeModalBtn: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
-    zIndex: 10,
-    backgroundColor: 'transparent',
-  },
+  fullScreenImage: { width: '100%', height: '100%' },
   commentBox: { flexDirection: 'row', padding: 10, borderBottomWidth: 1, borderColor: '#eee' },
-  commentTimestamp: { fontSize: 10, color: '#999', marginTop: 2 },
+  commentTimestamp: {
+    fontSize: 10,
+    color: '#999',
+    marginTop: 2,
+  },
   commentInputContainer: { flexDirection: 'row', padding: 10, borderTopWidth: 1, borderColor: '#eee' },
   commentInput: { flex: 1, backgroundColor: '#f0f2f5', borderRadius: 20, paddingHorizontal: 12 },
   sendButton: { backgroundColor: 'black', borderRadius: 20, padding: 10, marginLeft: 8 },
+
+
   modalOverlay: {
     flex: 1,
     justifyContent: "center",
@@ -898,7 +1048,10 @@ const styles = StyleSheet.create({
     marginVertical: 5,
     width: "100%",
   },
-  inputContainer: { width: "100%", position: "relative" },
+  inputContainer: {
+    width: "100%",
+    position: "relative",
+  },
   dropdownList: {
     width: "100%",
     backgroundColor: "#fff",
@@ -915,7 +1068,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#eee",
   },
-  dropdownItemText: { fontSize: 16, color: "#000" },
+  dropdownItemText: {
+    fontSize: 16,
+    color: "#000",
+  },
   modalButtons: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -958,6 +1114,7 @@ const styles = StyleSheet.create({
     height: "100%",
   },
 });
+
 
 export default HomeScreen;
 
