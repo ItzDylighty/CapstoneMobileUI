@@ -1,20 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  SafeAreaView,
-  Image,
-  TouchableOpacity,
-  Modal,
-  TextInput,
-  TouchableWithoutFeedback,
-  FlatList,
-  ScrollView,
-  Platform,
-  KeyboardAvoidingView,
-  Keyboard,
-} from 'react-native';
+import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, Modal, TextInput, TouchableWithoutFeedback, FlatList, ScrollView, Platform, KeyboardAvoidingView, Keyboard, Dimensions, } from 'react-native';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -22,9 +7,12 @@ import Header from '../components/Header';
 import { supabase } from "../../supabase/supabaseClient";
 import { useRouter } from "expo-router";
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const HomeScreen = () => {
   const [selectedImage, setSelectedImage] = useState(null);
+  const [selectedImages, setSelectedImages] = useState([]); // Array of images for carousel
+  const [currentImageIndex, setCurrentImageIndex] = useState(0); // Current image index
   const [modalVisible, setModalVisible] = useState(false);
   const [postText, setPostText] = useState('');
   const [pickedImages, setPickedImages] = useState([]);
@@ -74,11 +62,25 @@ const HomeScreen = () => {
 
 
   const router = useRouter();
-  const API_BASE = "http://192.168.18.22:3000/api";
+  const API_BASE = "http://192.168.254.114:3000/api";
 
 
 
+  // Helper: coerce various shapes into a valid uri string
+  const ensureUri = (value) => {
+    if (!value) return null;
+    if (typeof value === 'string') return value || null;
+    if (Array.isArray(value)) {
+      const first = value.find((v) => typeof v === 'string' && v);
+      return first || null;
+    }
+    if (typeof value === 'object' && value.uri) {
+      return typeof value.uri === 'string' ? value.uri : null;
+    }
+    return null;
+  };
 
+  
   // Fetch user profile from backend to determine if profile modal should show
   const fetchUserProfile = async (at, rt) => {
     try {
@@ -261,53 +263,55 @@ const HomeScreen = () => {
   const uploadPost = async () => {
     if (!postText && pickedImages.length === 0) return;
 
+
     const formData = new FormData();
-    formData.append("description", postText);
-    pickedImages.forEach((uri, index) => {
-      let fileUri = uri;
-      // Fix for Android and iOS uri schemes to ensure correct prefix
-      if (Platform.OS === "ios" && !uri.startsWith("file://")) {
-        fileUri = "file://" + uri;
-      }
-      // filename and type extraction
-      const filename = fileUri.split("/").pop();
+    formData.append("description", String(postText ?? ""));
+    formData.append("text", String(postText ?? ""));
+    
+    // Backend expects: file, file2, file3, file4 (max 4 images)
+    pickedImages.slice(0, 4).forEach((uri, index) => {
+      const filename = uri.split("/").pop();
       const match = /\.(\w+)$/.exec(filename);
-      const type = match ? `image/${match[1]}` : `image`;
-      formData.append("media", { uri: fileUri, name: filename, type });
+      const type = match ? `image/${match[1]}` : `image/jpeg`;
+      
+      // Field names: file, file2, file3, file4
+      const fieldName = index === 0 ? "file" : `file${index + 1}`;
+      formData.append(fieldName, { uri, name: filename, type });
     });
 
-    // Debug log for form data keys (can't log values directly)
-    console.log("[uploadPost] FormData keys:");
-    for (let pair of formData._parts) {
-      console.log(pair[0], pair[1]?.name || pair[1]);
-    }
 
     try {
       setLoading(true);
       const res = await fetch(`${API_BASE}/homepage/createPost`, {
         method: "POST",
         headers: {
-          // NOTE: do not set Content-Type manually with FormData in fetch; leaving it as-is is correct
+          // NOTE: do not set Content-Type manually with FormData in fetch; leaving it as-is is fine for RN fetch
           'Cookie': `access_token=${accessToken}; refresh_token=${refreshToken}`,
         },
         body: formData,
       });
-
-      // Additional debug for response status and text
       if (!res.ok) {
-        const text = await res.text();
-        console.error(`[uploadPost] Failed to upload post: status ${res.status}, response: ${text}`);
-        throw new Error(`Failed to upload post (status ${res.status})`);
+        let errMsg = `Failed to upload post (${res.status})`;
+        try {
+          const txt = await res.text();
+          try {
+            const j = txt ? JSON.parse(txt) : null;
+            if (j && (j.message || j.error)) errMsg = String(j.message || j.error);
+            else if (txt) errMsg = txt;
+          } catch {
+            if (txt) errMsg = txt;
+          }
+        } catch {}
+        throw new Error(errMsg);
       }
-
-      const data = await res.json();
+      let data = null;
+      try { data = await res.json(); } catch {}
       setModalVisible(false);
       setPostText("");
       setPickedImages([]);
       fetchPosts();
     } catch (err) {
-      setError("Failed to upload post");
-      console.error("[uploadPost] Error:", err.message || err);
+      setError(err?.message || "Failed to upload post");
     } finally {
       setLoading(false);
     }
@@ -555,7 +559,14 @@ const HomeScreen = () => {
   const renderPost = ({ item: post }) => (
     <View key={post.id} style={styles.card}>
       <View style={styles.userInfo}>
-        <Image source={{ uri: post.user?.avatar }} style={styles.avatar} />
+        {(() => {
+          const avatarUri = ensureUri(post.user?.avatar);
+          return avatarUri ? (
+            <Image source={{ uri: avatarUri }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, styles.placeholderCircle]} />
+          );
+        })()}
         <Text style={styles.username}>{post.user?.name}</Text>
       </View>
 
@@ -563,11 +574,46 @@ const HomeScreen = () => {
       {!!post.text && <Text style={styles.description}>{post.text}</Text>}
 
 
-      {!!post.image && (
-        <TouchableOpacity onPress={() => setSelectedImage({ uri: post.image })}>
-          <Image source={{ uri: post.image }} style={styles.postImage} resizeMode="cover" />
-        </TouchableOpacity>
-      )}
+      {(() => {
+        // Handle both single image and array of images
+        let imageArray = [];
+        if (Array.isArray(post.image)) {
+          imageArray = post.image;
+        } else if (post.image) {
+          imageArray = [post.image];
+        } else if (Array.isArray(post.images)) {
+          imageArray = post.images;
+        } else if (post.images) {
+          imageArray = [post.images];
+        }
+        
+        const postImageUri = imageArray.length > 0 ? ensureUri(imageArray[0]) : null;
+        
+        return postImageUri ? (
+          <TouchableOpacity onPress={() => {
+            setSelectedImages(imageArray.map(img => ({ uri: ensureUri(img) })));
+            setCurrentImageIndex(0);
+            setSelectedImage(true); // Just a flag to open modal
+          }}>
+            <Image source={{ uri: postImageUri }} style={styles.postImage} resizeMode="cover" />
+            {imageArray.length > 1 && (
+              <View style={{
+                position: 'absolute',
+                top: 8,
+                right: 8,
+                backgroundColor: 'rgba(0,0,0,0.7)',
+                paddingHorizontal: 8,
+                paddingVertical: 4,
+                borderRadius: 12,
+              }}>
+                <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>
+                  1/{imageArray.length}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        ) : null;
+      })()}
 
 
       {!!post.timestamp && (
@@ -598,7 +644,14 @@ const HomeScreen = () => {
   // Updated render function for comments to include timestamp below each comment
   const renderComment = ({ item }) => (
     <View style={styles.commentBox}>
-      <Image source={{ uri: item.user?.avatar }} style={styles.avatar} />
+      {(() => {
+        const avatarUri = ensureUri(item.user?.avatar);
+        return avatarUri ? (
+          <Image source={{ uri: avatarUri }} style={styles.avatar} />
+        ) : (
+          <View style={[styles.avatar, styles.placeholderCircle]} />
+        );
+      })()}
       <View style={{ flex: 1 }}>
         <Text style={{ fontWeight: 'bold' }}>{item.user?.name}</Text>
         <Text>{item.text}</Text>
@@ -638,11 +691,68 @@ const HomeScreen = () => {
       />
 
 
-      {/* Image fullscreen modal */}
-      <Modal visible={selectedImage !== null} transparent animationType="fade">
-        <TouchableOpacity style={styles.fullScreenContainer} onPress={() => setSelectedImage(null)}>
-          <Image source={selectedImage} style={styles.fullScreenImage} resizeMode="contain" />
-        </TouchableOpacity>
+      {/* Image fullscreen modal with carousel */}
+      <Modal visible={selectedImage !== null && selectedImages.length > 0} transparent animationType="fade">
+        <View style={styles.fullScreenContainer}>
+          {/* Close button */}
+          <TouchableOpacity 
+            style={{
+              position: 'absolute',
+              top: 40,
+              right: 20,
+              zIndex: 10,
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              borderRadius: 20,
+              width: 40,
+              height: 40,
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}
+            onPress={() => {
+              setSelectedImage(null);
+              setSelectedImages([]);
+              setCurrentImageIndex(0);
+            }}
+          >
+            <Ionicons name="close" size={24} color="white" />
+          </TouchableOpacity>
+
+          {/* Image counter */}
+          {selectedImages.length > 1 && (
+            <View style={{
+              position: 'absolute',
+              top: 40,
+              left: 20,
+              zIndex: 10,
+              backgroundColor: 'rgba(0,0,0,0.7)',
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 16,
+            }}>
+              <Text style={{ color: 'white', fontSize: 14, fontWeight: 'bold' }}>
+                {currentImageIndex + 1}/{selectedImages.length}
+              </Text>
+            </View>
+          )}
+
+          {/* Swipeable image carousel */}
+          <FlatList
+            data={selectedImages}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            keyExtractor={(item, index) => index.toString()}
+            onMomentumScrollEnd={(event) => {
+              const index = Math.round(event.nativeEvent.contentOffset.x / event.nativeEvent.layoutMeasurement.width);
+              setCurrentImageIndex(index);
+            }}
+            renderItem={({ item }) => (
+              <View style={{ width: SCREEN_WIDTH, justifyContent: 'center', alignItems: 'center' }}>
+                <Image source={item} style={styles.fullScreenImage} resizeMode="contain" />
+              </View>
+            )}
+          />
+        </View>
       </Modal>
 
 
@@ -670,7 +780,6 @@ const HomeScreen = () => {
                   />
                 </View>
 
-
                 <FlatList
                   horizontal
                   data={pickedImages}
@@ -678,12 +787,16 @@ const HomeScreen = () => {
                   showsHorizontalScrollIndicator={false}
                   renderItem={({ item, index }) => (
                     <View style={{ position: 'relative', marginRight: 10 }}>
-                      <Image source={{ uri: item }} style={styles.previewImage} />
+                      <Image
+                        source={{ uri: Array.isArray(item) ? item[0] : item }}
+                        style={styles.previewImage}
+                      />
                       <TouchableOpacity onPress={() => removeImage(index)} style={styles.removeImageBtn}>
                         <Ionicons name="close" size={18} color="black" />
                       </TouchableOpacity>
                     </View>
                   )}
+                                
                   ListFooterComponent={
                     <TouchableOpacity onPress={pickImage} style={styles.addMoreBtn} activeOpacity={0.7}>
                       <Ionicons name="image-outline" size={40} color="black" />
@@ -706,28 +819,34 @@ const HomeScreen = () => {
       {/* Comments Modal */}
       <Modal visible={commentModalVisible} animationType="slide">
         <SafeAreaView style={styles.container}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', padding: 10 }}>
-            <TouchableOpacity onPress={() => setCommentModalVisible(false)}>
-              <Ionicons name="arrow-back" size={24} color="#000" />
-            </TouchableOpacity>
-            <Text style={{ fontSize: 18, fontWeight: 'bold', marginLeft: 10 }}>Comments</Text>
-          </View>
-          <FlatList
-            data={currentPostComments}
-            keyExtractor={(item) => item.id.toString()}
-            renderItem={renderComment}
-          />
-          <View style={styles.commentInputContainer}>
-            <TextInput
-              style={styles.commentInput}
-              placeholder="Add a comment..."
-              value={newCommentText}
-              onChangeText={setNewCommentText}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={{ flex: 1 }}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', padding: 10 }}>
+              <TouchableOpacity onPress={() => setCommentModalVisible(false)}>
+                <Ionicons name="arrow-back" size={24} color="#000" />
+              </TouchableOpacity>
+              <Text style={{ fontSize: 18, fontWeight: 'bold', marginLeft: 10 }}>Comments</Text>
+            </View>
+            <FlatList
+              data={currentPostComments}
+              keyExtractor={(item) => item.id.toString()}
+              renderItem={renderComment}
             />
-            <TouchableOpacity onPress={postComment} style={styles.sendButton}>
-              <Ionicons name="send" size={20} color="white" />
-            </TouchableOpacity>
-          </View>
+            <View style={styles.commentInputContainer}>
+              <TextInput
+                style={styles.commentInput}
+                placeholder="Add a comment..."
+                value={newCommentText}
+                onChangeText={setNewCommentText}
+              />
+              <TouchableOpacity onPress={postComment} style={styles.sendButton}>
+                <Ionicons name="send" size={20} color="white" />
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
 
