@@ -835,7 +835,12 @@ export default function ProfileScreen() {
         </View>
 
 
-        <Text style={styles.name}>{username || "Username"}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: -30 }}>
+          <Text style={[styles.name, { marginTop: 0 }]}>{username || "Username"}</Text>
+          {(String(role || '').toLowerCase() === 'artist' || String(role || '').toLowerCase() === 'admin') && (
+            <Ionicons name="checkmark-circle" size={20} color="#1DA1F2" style={{ marginLeft: 6 }} />
+          )}
+        </View>
         <Text style={styles.detail}>Sex: {sex || "Not set"}</Text>
         <Text style={styles.detail}>Birthdate: {formattedDate || "Not set"}</Text>
         <Text style={styles.detail}>Address: {address}</Text>
