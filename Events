@@ -59,10 +59,26 @@ const EventsScreen = () => {
     fetchEvents();
   }, []);
 
-  // Sort events based on upload time (createdAt/created_at) - newest first
+  // Sort events based on upload time - newest first (top), oldest last (bottom)
   const sortedEvents = [...events].sort((a, b) => {
-    const dateA = new Date(a.createdAt || a.created_at || 0).getTime();
-    const dateB = new Date(b.createdAt || b.created_at || 0).getTime();
+    // Try multiple date field variations from backend
+    const getEventDate = (event) => {
+      const dateValue = event.createdAt || event.created_at || event.dateCreated || 
+                        event.date_created || event.createdTime || event.startsAt || 
+                        event.starts_at || event.eventDate || event.uploadedAt;
+      return dateValue ? new Date(dateValue).getTime() : 0;
+    };
+    
+    const dateA = getEventDate(a);
+    const dateB = getEventDate(b);
+    
+    // If dates are equal or both invalid, use eventId as tiebreaker (higher ID = newer)
+    if (dateA === dateB) {
+      const idA = parseInt(a.eventId || a.id || 0);
+      const idB = parseInt(b.eventId || b.id || 0);
+      return idB - idA;
+    }
+    
     return dateB - dateA; // Newest first (descending)
   });
 
@@ -172,4 +188,3 @@ const styles = StyleSheet.create({
 });
 
 export default EventsScreen;
-
