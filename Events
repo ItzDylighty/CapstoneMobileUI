@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from "../../supabase/supabaseClient";
 import { useRouter } from 'expo-router';
 import Header from '../components/Header'; // Reusable Header
@@ -19,6 +20,7 @@ const EventsScreen = () => {
   const router = useRouter();
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Fetch events from backend
   useEffect(() => {
@@ -40,13 +42,7 @@ const EventsScreen = () => {
 
         if (response.ok) {
           const list = Array.isArray(result) ? result : (result?.data || result?.events || []);
-          // Sort events from newest to oldest
-          const sortedList = list.sort((a, b) => {
-            const dateA = new Date(a.createdAt || a.created_at || a.startsAt || 0);
-            const dateB = new Date(b.createdAt || b.created_at || b.startsAt || 0);
-            return dateB - dateA; // Descending order (newest first)
-          });
-          setEvents(sortedList);
+          setEvents(list);
         } else {
           const message = result?.error || `Failed to fetch events (${response.status})`;
           console.error('Error fetching events:', message, '| Body:', result);
@@ -63,6 +59,28 @@ const EventsScreen = () => {
     fetchEvents();
   }, []);
 
+  // Sort events based on upload time (createdAt/created_at) - newest first
+  const sortedEvents = [...events].sort((a, b) => {
+    const dateA = new Date(a.createdAt || a.created_at || 0).getTime();
+    const dateB = new Date(b.createdAt || b.created_at || 0).getTime();
+    return dateB - dateA; // Newest first (descending)
+  });
+
+  // Filter events based on search query
+  const filteredEvents = sortedEvents.filter(event => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase();
+    const title = (event.title || '').toLowerCase();
+    const description = (event.description || '').toLowerCase();
+    const venue = (event.venueName || event.venue || '').toLowerCase();
+    const location = (event.location || '').toLowerCase();
+    return title.includes(query) || description.includes(query) || venue.includes(query) || location.includes(query);
+  });
+
+  const handleSearch = (text) => {
+    setSearchQuery(text);
+  };
+
   const handlePressEvent = (eventId) => {
     if (!eventId) return;
    
@@ -71,7 +89,7 @@ const EventsScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Header title="Events" showSearch={true} />
+      <Header title="Events" showSearch={true} onSearch={handleSearch} />
 
       {loading ? (
         <View style={styles.centered}>
@@ -80,8 +98,8 @@ const EventsScreen = () => {
       ) : (
         <ScrollView style={styles.eventGrid}>
           <View style={styles.row}>
-            {events.length > 0 ? (
-              events.map(event => (
+            {filteredEvents.length > 0 ? (
+              filteredEvents.map(event => (
                 <EventCard
                   key={event.eventId || event.id}
                   title={event.title}
@@ -89,8 +107,22 @@ const EventsScreen = () => {
                   onPress={() => handlePressEvent(event.eventId || event.id)}
                 />
               ))
+            ) : searchQuery.trim() ? (
+              <View style={styles.noResults}>
+                <Ionicons name="search-outline" size={64} color="#ccc" />
+                <Text style={styles.noResultsTitle}>No results found</Text>
+                <Text style={styles.noResultsText}>
+                  Try searching for different keywords
+                </Text>
+              </View>
             ) : (
-              <Text style={{ textAlign: 'center', marginTop: 20 }}>No events available.</Text>
+              <View style={styles.noResults}>
+                <Ionicons name="calendar-outline" size={64} color="#ccc" />
+                <Text style={styles.noResultsTitle}>No events available</Text>
+                <Text style={styles.noResultsText}>
+                  Check back later for upcoming events
+                </Text>
+              </View>
             )}
           </View>
         </ScrollView>
@@ -118,6 +150,26 @@ const styles = StyleSheet.create({
   eventImage: { width: 100, height: 100, borderRadius: 10, marginBottom: 10 },
   eventTitle: { fontWeight: 'bold', textAlign: 'center', marginBottom: 4 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  noResults: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 20,
+  },
+  noResultsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  noResultsText: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
 });
 
 export default EventsScreen;
+
