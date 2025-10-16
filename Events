@@ -1,0 +1,123 @@
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { supabase } from "../../supabase/supabaseClient";
+import { useRouter } from 'expo-router';
+import Header from '../components/Header'; // Reusable Header
+
+// Match home.js approach
+const API_BASE = "http://192.168.254.114:3000/api";
+
+// Reusable component for each event card
+const EventCard = ({ title, imageSource, onPress }) => (
+  <TouchableOpacity style={styles.eventCard} onPress={onPress}>
+    <Image source={{ uri: imageSource }} style={styles.eventImage} />
+    <Text style={styles.eventTitle}>{title}</Text>
+  </TouchableOpacity>
+);
+
+const EventsScreen = () => {
+  const router = useRouter();
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch events from backend
+  useEffect(() => {
+    const fetchEvents = async () => {
+      try {
+        const headers = { Accept: 'application/json' };
+        // Get tokens from supabase session, like home.js
+        const { data } = await supabase.auth.getSession();
+        const at = data?.session?.access_token || null;
+        const rt = data?.session?.refresh_token || null;
+        if (!at || !rt) {
+          Alert.alert('Authentication required', 'Please login to view events.');
+          setLoading(false);
+          return;
+        }
+        headers['Cookie'] = `access_token=${at}; refresh_token=${rt}`;
+        const response = await fetch(`${API_BASE}/event/getEvents`, { headers, method: 'GET' });
+        const result = await response.json();
+
+        if (response.ok) {
+          const list = Array.isArray(result) ? result : (result?.data || result?.events || []);
+          // Sort events from newest to oldest
+          const sortedList = list.sort((a, b) => {
+            const dateA = new Date(a.createdAt || a.created_at || a.startsAt || 0);
+            const dateB = new Date(b.createdAt || b.created_at || b.startsAt || 0);
+            return dateB - dateA; // Descending order (newest first)
+          });
+          setEvents(sortedList);
+        } else {
+          const message = result?.error || `Failed to fetch events (${response.status})`;
+          console.error('Error fetching events:', message, '| Body:', result);
+          Alert.alert('Error', message);
+        }
+      } catch (error) {
+        console.error('Network error:', error);
+        Alert.alert('Network Error', 'Unable to connect to the server.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchEvents();
+  }, []);
+
+  const handlePressEvent = (eventId) => {
+    if (!eventId) return;
+   
+    router.push({ pathname: '/(drawer)/viewEvents', params: { eventId: String(eventId) } });
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <Header title="Events" showSearch={true} />
+
+      {loading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#000" />
+        </View>
+      ) : (
+        <ScrollView style={styles.eventGrid}>
+          <View style={styles.row}>
+            {events.length > 0 ? (
+              events.map(event => (
+                <EventCard
+                  key={event.eventId || event.id}
+                  title={event.title}
+                  imageSource={event.image} // image should be a valid URL from backend
+                  onPress={() => handlePressEvent(event.eventId || event.id)}
+                />
+              ))
+            ) : (
+              <Text style={{ textAlign: 'center', marginTop: 20 }}>No events available.</Text>
+            )}
+          </View>
+        </ScrollView>
+      )}
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff' },
+  eventGrid: { padding: 10 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  eventCard: {
+    width: '48%',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  eventImage: { width: 100, height: 100, borderRadius: 10, marginBottom: 10 },
+  eventTitle: { fontWeight: 'bold', textAlign: 'center', marginBottom: 4 },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+});
+
+export default EventsScreen;
