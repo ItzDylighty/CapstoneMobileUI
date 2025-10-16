@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, Modal, TextInput, TouchableWithoutFeedback, FlatList, ScrollView, Platform, KeyboardAvoidingView, Keyboard, Dimensions, } from 'react-native';
+import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, Modal, TextInput, TouchableWithoutFeedback, FlatList, ScrollView, Platform, KeyboardAvoidingView, Keyboard, Dimensions, BackHandler } from 'react-native';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import Header from '../components/Header';
 import { supabase } from "../../supabase/supabaseClient";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -195,6 +195,35 @@ const HomeScreen = () => {
     };
     init();
   }, []);
+
+  // Android hardware back: close any open modal in priority order, else pass through
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBackPress = () => {
+        if (selectedImage !== null && selectedImages.length > 0) {
+          setSelectedImage(null);
+          setSelectedImages([]);
+          setCurrentImageIndex(0);
+          return true;
+        }
+        if (commentModalVisible) {
+          setCommentModalVisible(false);
+          return true;
+        }
+        if (modalVisible) {
+          setModalVisible(false);
+          return true;
+        }
+        if (profileModalVisible) {
+          setProfileModalVisible(false);
+          return true;
+        }
+        return false; // allow default behavior
+      };
+      const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => sub.remove();
+    }, [selectedImage, selectedImages.length, commentModalVisible, modalVisible, profileModalVisible])
+  );
 
 
   const fetchPosts = async (at = accessToken, rt = refreshToken) => {
@@ -692,7 +721,16 @@ const HomeScreen = () => {
 
 
       {/* Image fullscreen modal with carousel */}
-      <Modal visible={selectedImage !== null && selectedImages.length > 0} transparent animationType="fade">
+      <Modal
+        visible={selectedImage !== null && selectedImages.length > 0}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setSelectedImage(null);
+          setSelectedImages([]);
+          setCurrentImageIndex(0);
+        }}
+      >
         <View style={styles.fullScreenContainer}>
           {/* Close button */}
           <TouchableOpacity 
