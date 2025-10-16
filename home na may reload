@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, Modal, TextInput, TouchableWithoutFeedback, FlatList, ScrollView, Platform, KeyboardAvoidingView, Keyboard, Dimensions, BackHandler } from 'react-native';
+import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, Modal, TextInput, TouchableWithoutFeedback, FlatList, ScrollView, Platform, KeyboardAvoidingView, Keyboard, Dimensions, BackHandler, RefreshControl } from 'react-native';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -27,6 +27,7 @@ const HomeScreen = () => {
   const [refreshToken, setRefreshToken] = useState(null);
   const [role, setRole] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
 
   const [commentModalVisible, setCommentModalVisible] = useState(false);
@@ -245,8 +246,9 @@ const HomeScreen = () => {
       });
       const data = await res.json();
 
-
-      setPosts(data.posts || []);
+      // Combine regular posts and announcements, just like web version
+      const allPosts = [...(data.announcements || []), ...(data.posts || [])];
+      setPosts(allPosts);
 
 
       const reactCounts = {};
@@ -690,56 +692,67 @@ const HomeScreen = () => {
     </View>
   );
 
-  const renderEvent = ({ item: event }) => (
-    <TouchableOpacity 
-      key={event.eventId || event.id} 
-      style={[styles.card, styles.eventCard]}
-      onPress={() => router.push({ pathname: '/(drawer)/viewEvents', params: { eventId: String(event.eventId || event.id) } })}
-    >
-      <View style={styles.eventBadge}>
-        <Ionicons name="calendar" size={14} color="#fff" />
-        <Text style={styles.eventBadgeText}>Event</Text>
-      </View>
-
-      {event.image && (
-        <Image source={{ uri: event.image }} style={styles.postImage} resizeMode="cover" />
-      )}
-
-      <Text style={styles.eventTitle}>{event.title}</Text>
-      
-      {!!event.details && (
-        <Text style={styles.description} numberOfLines={3}>
-          {event.details}
-        </Text>
-      )}
-
-      {(event.startsAt || event.venueName) && (
-        <View style={styles.eventMetaContainer}>
-          {!!event.startsAt && (
-            <View style={styles.eventMeta}>
-              <Ionicons name="time-outline" size={16} color="#555" />
-              <Text style={styles.eventMetaText}>
-                {new Date(event.startsAt).toLocaleDateString()}
-              </Text>
-            </View>
-          )}
-          {!!event.venueName && (
-            <View style={styles.eventMeta}>
-              <Ionicons name="location-outline" size={16} color="#555" />
-              <Text style={styles.eventMetaText} numberOfLines={1}>
-                {event.venueName}
-              </Text>
-            </View>
-          )}
+  const renderEvent = ({ item: announcementPost }) => {
+    // For announcement posts, look up full event data using eventId
+    const fullEvent = announcementPost.eventId 
+      ? events.find(e => e.eventId === announcementPost.eventId) 
+      : null;
+    const displayData = fullEvent || announcementPost;
+    
+    return (
+      <TouchableOpacity 
+        key={announcementPost.id} 
+        style={[styles.card, styles.eventCard]}
+        onPress={() => router.push({ 
+          pathname: '/(drawer)/viewEvents', 
+          params: { eventId: String(announcementPost.eventId || displayData.eventId || displayData.id) } 
+        })}
+      >
+        <View style={styles.eventBadge}>
+          <Ionicons name="calendar" size={14} color="#fff" />
+          <Text style={styles.eventBadgeText}>Event</Text>
         </View>
-      )}
 
-      <View style={styles.eventViewMore}>
-        <Text style={styles.eventViewMoreText}>View Details</Text>
-        <Ionicons name="chevron-forward" size={16} color="#000" />
-      </View>
-    </TouchableOpacity>
-  );
+        {displayData.image && (
+          <Image source={{ uri: displayData.image }} style={styles.postImage} resizeMode="cover" />
+        )}
+
+        <Text style={styles.eventTitle}>{displayData.title || announcementPost.title}</Text>
+        
+        {!!displayData.details && (
+          <Text style={styles.description} numberOfLines={3}>
+            {displayData.details}
+          </Text>
+        )}
+
+        {(displayData.startsAt || displayData.venueName || announcementPost.venueName) && (
+          <View style={styles.eventMetaContainer}>
+            {!!displayData.startsAt && (
+              <View style={styles.eventMeta}>
+                <Ionicons name="time-outline" size={16} color="#555" />
+                <Text style={styles.eventMetaText}>
+                  {new Date(displayData.startsAt).toLocaleDateString()}
+                </Text>
+              </View>
+            )}
+            {!!(displayData.venueName || announcementPost.venueName) && (
+              <View style={styles.eventMeta}>
+                <Ionicons name="location-outline" size={16} color="#555" />
+                <Text style={styles.eventMetaText} numberOfLines={1}>
+                  {displayData.venueName || announcementPost.venueName}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        <View style={styles.eventViewMore}>
+          <Text style={styles.eventViewMoreText}>View Details</Text>
+          <Ionicons name="chevron-forward" size={16} color="#000" />
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
 
   // Updated render function for comments to include timestamp below each comment
@@ -769,53 +782,61 @@ const HomeScreen = () => {
     setSearchQuery(query);
   };
 
+  // Pull to refresh handler
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      // Fetch both posts and events
+      await Promise.all([
+        fetchPosts(accessToken, refreshToken),
+        fetchEvents(accessToken, refreshToken)
+      ]);
+    } catch (err) {
+      console.error('Refresh error:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   // Filter posts and events based on search query
+  // Matches web React logic: combine posts (including announcement posts) and sort by datePosted
   const getFilteredData = () => {
     if (!searchQuery.trim()) {
-      // No search - return all items sorted by date
-      return [
-        ...events.map(e => ({ 
-          ...e, 
-          itemType: 'event', 
-          id: e.eventId || e.id,
-          sortDate: e.createdAt || e.created_at || e.startsAt || new Date(0).toISOString()
-        })),
-        ...posts.map(p => ({ 
+      // Unified feed: all posts (regular + announcements) sorted by datePosted desc
+      // Same as web: [...(announcements||[]), ...(posts||[])].sort((a,b) => datePosted desc)
+      return posts
+        .map(p => ({ 
           ...p, 
-          itemType: 'post',
-          sortDate: p.datePosted || p.timestamp || p.createdAt || p.created_at || new Date(0).toISOString()
+          itemType: p.isAnnouncement ? 'event' : 'post',
+          sortDate: p.datePosted || p.timestamp || new Date(0).toISOString()
         }))
-      ].sort((a, b) => new Date(b.sortDate) - new Date(a.sortDate));
+        .sort((a, b) => {
+          const da = new Date(a.sortDate).getTime() || 0;
+          const db = new Date(b.sortDate).getTime() || 0;
+          return db - da; // newest first
+        });
     }
 
     const query = searchQuery.toLowerCase().trim();
     
-    // Filter events by title, details, or venue
-    const filteredEvents = events.filter(e => 
-      (e.title && e.title.toLowerCase().includes(query)) ||
-      (e.details && e.details.toLowerCase().includes(query)) ||
-      (e.venueName && e.venueName.toLowerCase().includes(query))
-    );
-
-    // Filter posts by username or post text
+    // Filter posts by username, post text, or title (for announcements)
     const filteredPosts = posts.filter(p => 
       (p.user?.name && p.user.name.toLowerCase().includes(query)) ||
-      (p.text && p.text.toLowerCase().includes(query))
+      (p.text && p.text.toLowerCase().includes(query)) ||
+      (p.title && p.title.toLowerCase().includes(query))
     );
 
-    return [
-      ...filteredEvents.map(e => ({ 
-        ...e, 
-        itemType: 'event', 
-        id: e.eventId || e.id,
-        sortDate: e.createdAt || e.created_at || e.startsAt || new Date(0).toISOString()
-      })),
-      ...filteredPosts.map(p => ({ 
+    return filteredPosts
+      .map(p => ({ 
         ...p, 
-        itemType: 'post',
-        sortDate: p.datePosted || p.timestamp || p.createdAt || p.created_at || new Date(0).toISOString()
+        itemType: p.isAnnouncement ? 'event' : 'post',
+        sortDate: p.datePosted || p.timestamp || new Date(0).toISOString()
       }))
-    ].sort((a, b) => new Date(b.sortDate) - new Date(a.sortDate));
+      .sort((a, b) => {
+        const da = new Date(a.sortDate).getTime() || 0;
+        const db = new Date(b.sortDate).getTime() || 0;
+        return db - da;
+      });
   };
 
   const filteredData = getFilteredData();
@@ -843,6 +864,14 @@ const HomeScreen = () => {
         keyExtractor={(item) => `${item.itemType}-${item.id || item.eventId}`}
         renderItem={({ item }) => item.itemType === 'event' ? renderEvent({ item }) : renderPost({ item })}
         contentContainerStyle={{ paddingBottom: 120 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#000']} // Android
+            tintColor="#000" // iOS
+          />
+        }
         ListEmptyComponent={
           loading ? (
             <Text style={{ margin: 12 }}>Loading...</Text>
