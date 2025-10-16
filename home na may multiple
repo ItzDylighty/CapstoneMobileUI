@@ -19,12 +19,14 @@ const HomeScreen = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [posts, setPosts] = useState([]);
+  const [events, setEvents] = useState([]);
   const [likes, setLikes] = useState({});
   const [comments, setComments] = useState({});
   const [userLikes, setUserLikes] = useState({});
   const [accessToken, setAccessToken] = useState(null);
   const [refreshToken, setRefreshToken] = useState(null);
   const [role, setRole] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
 
   const [commentModalVisible, setCommentModalVisible] = useState(false);
@@ -183,9 +185,11 @@ const HomeScreen = () => {
           await fetchRole(at, rt);
           await fetchUserProfile(at, rt);
           await fetchPosts(at, rt);
+          await fetchEvents(at, rt);
         } else {
           // no session tokens - still fetch posts (may be public) or skip
           await fetchPosts(at, rt);
+          await fetchEvents(at, rt);
         }
       } catch (e) {
         setError(e.message || "Failed to initialize session");
@@ -272,6 +276,23 @@ const HomeScreen = () => {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchEvents = async (at = accessToken, rt = refreshToken) => {
+    try {
+      const res = await fetch(`${API_BASE}/event/getEvents`, {
+        method: 'GET',
+        headers: {
+          'Cookie': `access_token=${at}; refresh_token=${rt}`,
+        },
+      });
+      const data = await res.json();
+      const eventList = Array.isArray(data?.data) ? data.data : [];
+      setEvents(eventList);
+    } catch (err) {
+      console.error('Error fetching events:', err.message);
+      setEvents([]);
     }
   };
 
@@ -504,7 +525,7 @@ const HomeScreen = () => {
       formData.append("about", String(about ?? ""));
 
 
-      // Debug summary of what we're about to send (files not included)
+      // Debug summary of what we're about to send
       try {
         console.log("[home.js] updateProfile payload:", {
           firstName,
@@ -669,6 +690,57 @@ const HomeScreen = () => {
     </View>
   );
 
+  const renderEvent = ({ item: event }) => (
+    <TouchableOpacity 
+      key={event.eventId || event.id} 
+      style={[styles.card, styles.eventCard]}
+      onPress={() => router.push({ pathname: '/(drawer)/viewEvents', params: { eventId: String(event.eventId || event.id) } })}
+    >
+      <View style={styles.eventBadge}>
+        <Ionicons name="calendar" size={14} color="#fff" />
+        <Text style={styles.eventBadgeText}>Event</Text>
+      </View>
+
+      {event.image && (
+        <Image source={{ uri: event.image }} style={styles.postImage} resizeMode="cover" />
+      )}
+
+      <Text style={styles.eventTitle}>{event.title}</Text>
+      
+      {!!event.details && (
+        <Text style={styles.description} numberOfLines={3}>
+          {event.details}
+        </Text>
+      )}
+
+      {(event.startsAt || event.venueName) && (
+        <View style={styles.eventMetaContainer}>
+          {!!event.startsAt && (
+            <View style={styles.eventMeta}>
+              <Ionicons name="time-outline" size={16} color="#555" />
+              <Text style={styles.eventMetaText}>
+                {new Date(event.startsAt).toLocaleDateString()}
+              </Text>
+            </View>
+          )}
+          {!!event.venueName && (
+            <View style={styles.eventMeta}>
+              <Ionicons name="location-outline" size={16} color="#555" />
+              <Text style={styles.eventMetaText} numberOfLines={1}>
+                {event.venueName}
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      <View style={styles.eventViewMore}>
+        <Text style={styles.eventViewMoreText}>View Details</Text>
+        <Ionicons name="chevron-forward" size={16} color="#000" />
+      </View>
+    </TouchableOpacity>
+  );
+
 
   // Updated render function for comments to include timestamp below each comment
   const renderComment = ({ item }) => (
@@ -693,9 +765,64 @@ const HomeScreen = () => {
   );
 
 
+  const handleSearch = (query) => {
+    setSearchQuery(query);
+  };
+
+  // Filter posts and events based on search query
+  const getFilteredData = () => {
+    if (!searchQuery.trim()) {
+      // No search - return all items sorted by date
+      return [
+        ...events.map(e => ({ 
+          ...e, 
+          itemType: 'event', 
+          id: e.eventId || e.id,
+          sortDate: e.createdAt || e.created_at || e.startsAt || new Date(0).toISOString()
+        })),
+        ...posts.map(p => ({ 
+          ...p, 
+          itemType: 'post',
+          sortDate: p.datePosted || p.timestamp || p.createdAt || p.created_at || new Date(0).toISOString()
+        }))
+      ].sort((a, b) => new Date(b.sortDate) - new Date(a.sortDate));
+    }
+
+    const query = searchQuery.toLowerCase().trim();
+    
+    // Filter events by title, details, or venue
+    const filteredEvents = events.filter(e => 
+      (e.title && e.title.toLowerCase().includes(query)) ||
+      (e.details && e.details.toLowerCase().includes(query)) ||
+      (e.venueName && e.venueName.toLowerCase().includes(query))
+    );
+
+    // Filter posts by username or post text
+    const filteredPosts = posts.filter(p => 
+      (p.user?.name && p.user.name.toLowerCase().includes(query)) ||
+      (p.text && p.text.toLowerCase().includes(query))
+    );
+
+    return [
+      ...filteredEvents.map(e => ({ 
+        ...e, 
+        itemType: 'event', 
+        id: e.eventId || e.id,
+        sortDate: e.createdAt || e.created_at || e.startsAt || new Date(0).toISOString()
+      })),
+      ...filteredPosts.map(p => ({ 
+        ...p, 
+        itemType: 'post',
+        sortDate: p.datePosted || p.timestamp || p.createdAt || p.created_at || new Date(0).toISOString()
+      }))
+    ].sort((a, b) => new Date(b.sortDate) - new Date(a.sortDate));
+  };
+
+  const filteredData = getFilteredData();
+
   return (
     <SafeAreaView style={styles.container}>
-      <Header title="HOME" showSearch={true} />
+      <Header title="HOME" showSearch={true} onSearch={handleSearch} />
 
 
       {error && <Text style={{ color: 'red', margin: 10 }}>{error}</Text>}
@@ -712,11 +839,23 @@ const HomeScreen = () => {
 
 
       <FlatList
-        data={posts}
-        keyExtractor={(item) => item.id.toString()}
-        renderItem={renderPost}
+        data={filteredData}
+        keyExtractor={(item) => `${item.itemType}-${item.id || item.eventId}`}
+        renderItem={({ item }) => item.itemType === 'event' ? renderEvent({ item }) : renderPost({ item })}
         contentContainerStyle={{ paddingBottom: 120 }}
-        ListEmptyComponent={loading ? <Text style={{ margin: 12 }}>Loading...</Text> : null}
+        ListEmptyComponent={
+          loading ? (
+            <Text style={{ margin: 12 }}>Loading...</Text>
+          ) : searchQuery.trim() ? (
+            <View style={styles.noResults}>
+              <Ionicons name="search-outline" size={64} color="#ccc" />
+              <Text style={styles.noResultsTitle}>No results found</Text>
+              <Text style={styles.noResultsText}>
+                Try searching for different keywords
+              </Text>
+            </View>
+          ) : null
+        }
       />
 
 
@@ -824,13 +963,13 @@ const HomeScreen = () => {
                   keyExtractor={(_, index) => index.toString()}
                   showsHorizontalScrollIndicator={false}
                   renderItem={({ item, index }) => (
-                    <View style={{ position: 'relative', marginRight: 10 }}>
+                    <View style={{ position: 'relative', marginRight: 10, overflow: 'visible' }}>
                       <Image
                         source={{ uri: Array.isArray(item) ? item[0] : item }}
                         style={styles.previewImage}
                       />
                       <TouchableOpacity onPress={() => removeImage(index)} style={styles.removeImageBtn}>
-                        <Ionicons name="close" size={18} color="black" />
+                        <Ionicons name="close" size={18} color="white" />
                       </TouchableOpacity>
                     </View>
                   )}
@@ -1090,33 +1229,35 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 15,
     padding: 15,
-    shadowColor: '#000',
+    shadowColor: 'black',
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 5,
   },
-  modalInputBox: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  modalInputBox: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 },
   modalInput: {
     flex: 1,
     backgroundColor: '#f0f2f5',
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    marginBottom: 15,
+    minHeight: 40,
+    maxHeight: 120,
     color: '#000',
   },
   previewImage: { width: 90, height: 90, borderRadius: 12 },
   removeImageBtn: {
     position: 'absolute',
-    top: -8,
-    right: -8,
+    top: 1,
+    right: -4,
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: 'white',
+    backgroundColor: 'black',
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 3,
+    zIndex: 10,
   },
   addMoreBtn: {
     width: 90,
@@ -1270,8 +1411,84 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
+  eventCard: {
+    shadowColor: 'black',
+    shadowOpacity: 0.09,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  eventBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#000',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  eventBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginLeft: 4,
+  },
+  eventTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000',
+    marginBottom: 8,
+  },
+  eventMetaContainer: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  eventMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  eventMetaText: {
+    fontSize: 14,
+    color: '#555',
+    marginLeft: 6,
+    flex: 1,
+  },
+  eventViewMore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    marginTop: 8,
+  },
+  eventViewMoreText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000',
+    marginRight: 4,
+  },
+  noResults: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 20,
+  },
+  noResultsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  noResultsText: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
 });
 
 
 export default HomeScreen;
-
