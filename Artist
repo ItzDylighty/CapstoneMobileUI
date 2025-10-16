@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, Text, SafeAreaView, Image, ScrollView, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Header from '../components/Header'; // Import the reusable Header
 import { supabase } from "../../supabase/supabaseClient";
 import { useRouter } from "expo-router";
@@ -30,6 +31,7 @@ const ArtistsScreen = () => {
   const [accessToken, setAccessToken] = useState(null);
   const [refreshToken, setRefreshToken] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     let isMounted = true;
@@ -62,12 +64,22 @@ const ArtistsScreen = () => {
         const json = await res.json();
         const list = Array.isArray(json?.artists) ? json.artists : [];
         if (isMounted && list.length) {
-          setArtists(list.map((a) => ({
+          const mappedArtists = list.map((a) => ({
             id: a.id || a.username || String(Math.random()),
             username: a.username || null,
             name: a.name || a.username || 'Untitled Artist',
             image: a.hero || a.image || null,
-          })));
+            createdAt: a.createdAt || a.created_at || a.createdTime || null,
+          }));
+          
+          // Sort by newest first
+          const sortedArtists = mappedArtists.sort((a, b) => {
+            const dateA = new Date(a.createdAt || 0).getTime();
+            const dateB = new Date(b.createdAt || 0).getTime();
+            return dateB - dateA; // Newest first (descending)
+          });
+          
+          setArtists(sortedArtists);
         } else if (isMounted) {
           setArtists([]);
         }
@@ -82,10 +94,23 @@ const ArtistsScreen = () => {
     return () => { isMounted = false; };
   }, [API_BASE]);
 
+  // Filter artists based on search query
+  const filteredArtists = artists.filter(artist => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase();
+    const name = (artist.name || '').toLowerCase();
+    const username = (artist.username || '').toLowerCase();
+    return name.includes(query) || username.includes(query);
+  });
+
+  const handleSearch = (text) => {
+    setSearchQuery(text);
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Reusable Header with search */}
-      <Header title="Artists" showSearch={true} />
+      <Header title="Artists" showSearch={true} onSearch={handleSearch} />
 
       {/* Artist Grid */}
       <ScrollView style={styles.artistGrid}>
@@ -93,23 +118,41 @@ const ArtistsScreen = () => {
           <Text style={{ margin: 12 }}>Loading...</Text>
         ) : null}
         <View style={styles.row}>
-          {artists.map(artist => (
-            <ArtistCard
-              key={artist.id}
-              name={artist.name}
-              imageSource={artist.image}
-              onPress={() => {
-                router.push({
-                  pathname: '/(drawer)/viewArtist',
-                  params: {
-                    id: String(artist.id ?? ''),
-                    username: String(artist.username ?? ''),
-                    name: String(artist.name ?? ''),
-                  },
-                });
-              }}
-            />
-          ))}
+          {filteredArtists.length > 0 ? (
+            filteredArtists.map(artist => (
+              <ArtistCard
+                key={artist.id}
+                name={artist.name}
+                imageSource={artist.image}
+                onPress={() => {
+                  router.push({
+                    pathname: '/(drawer)/viewArtist',
+                    params: {
+                      id: String(artist.id ?? ''),
+                      username: String(artist.username ?? ''),
+                      name: String(artist.name ?? ''),
+                    },
+                  });
+                }}
+              />
+            ))
+          ) : !loading && searchQuery.trim() ? (
+            <View style={styles.noResults}>
+              <Ionicons name="search-outline" size={64} color="#ccc" />
+              <Text style={styles.noResultsTitle}>No results found</Text>
+              <Text style={styles.noResultsText}>
+                Try searching for different keywords
+              </Text>
+            </View>
+          ) : !loading && artists.length === 0 ? (
+            <View style={styles.noResults}>
+              <Ionicons name="people-outline" size={64} color="#ccc" />
+              <Text style={styles.noResultsTitle}>No artists available</Text>
+              <Text style={styles.noResultsText}>
+                Check back later for featured artists
+              </Text>
+            </View>
+          ) : null}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -156,6 +199,27 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
   },
+  noResults: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 20,
+    width: '100%',
+  },
+  noResultsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  noResultsText: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
 });
 
 export default ArtistsScreen;
+
