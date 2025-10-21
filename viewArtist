@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { View, Text, Image, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, Platform, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, Alert, BackHandler } from "react-native";
+import { View, Text, Image, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, Platform, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, Alert, BackHandler, RefreshControl, SafeAreaView } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -49,6 +49,7 @@ export default function ProfileScreen() {
   const [artLikesCount, setArtLikesCount] = useState(0);
   const [artUserLiked, setArtUserLiked] = useState(false);
   const [artNewComment, setArtNewComment] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
   // Android hardware back: always go back to artists.js
   useEffect(() => {
@@ -90,13 +91,21 @@ export default function ProfileScreen() {
 
   const fetchViewedGallery = async (at, rt) => {
     try {
-      if (!viewedId) return;
+      if (!viewedId) {
+        setGalleryImages([]);
+        return;
+      }
       const res = await fetch(`${API_BASE}/artist/getArts/${encodeURIComponent(viewedId)}`, {
         method: 'GET',
         headers: { Cookie: `access_token=${at || ''}; refresh_token=${rt || ''}` },
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        console.log('[viewArtist] fetchViewedGallery failed:', res.status);
+        setGalleryImages([]);
+        return;
+      }
       const data = await res.json();
+      console.log('[viewArtist] fetchViewedGallery data:', data);
       const list = Array.isArray(data) ? data : (data?.arts || data || []);
       const items = list.map((a) => {
         const u = a?.image;
@@ -110,8 +119,11 @@ export default function ProfileScreen() {
           timestamp: a?.timestamp || a?.datePosted || null,
         };
       }).filter(x => !!x.image);
+      console.log('[viewArtist] Filtered gallery items:', items.length);
       setGalleryImages(items);
-    } catch {}
+    } catch (err) {
+      setGalleryImages([]);
+    }
   };
 
   // Function to upload artwork image to the backend and refresh gallery
@@ -429,8 +441,13 @@ export default function ProfileScreen() {
         method: "GET",
         headers: { Cookie: `access_token=${at}; refresh_token=${rt}` },
       });
-      if (!res.ok) throw new Error(`Failed to fetch gallery (${res.status})`);
+      if (!res.ok) {
+        console.log('[viewArtist] fetchGallery failed:', res.status);
+        setGalleryImages([]);
+        return;
+      }
       const data = await res.json();
+      console.log('[viewArtist] fetchGallery data:', data);
       const list = Array.isArray(data) ? data : (data?.arts || data || []);
       const items = list.map((a) => {
         const u = a?.image;
@@ -444,8 +461,12 @@ export default function ProfileScreen() {
           timestamp: a?.timestamp || a?.datePosted || null,
         };
       }).filter(x => !!x.image);
+      console.log('[viewArtist] Filtered own gallery items:', items.length);
       setGalleryImages(items);
-    } catch {}
+    } catch (err) {
+      console.log('[viewArtist] fetchGallery error:', err);
+      setGalleryImages([]);
+    }
   };
 
   useFocusEffect(
@@ -461,9 +482,49 @@ export default function ProfileScreen() {
     }, [isViewingOther, role, accessToken, refreshToken])
   );
 
+  // Pull to refresh handler
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      if (isViewingOther) {
+        // Refresh viewed artist's profile and gallery
+        await Promise.all([
+          fetchViewedProfile(accessToken, refreshToken),
+          fetchViewedGallery(accessToken, refreshToken)
+        ]);
+      } else {
+        // Refresh own profile and gallery
+        const r = String(role || '').toLowerCase();
+        if (r === 'artist' || r === 'admin') {
+          await Promise.all([
+            fetchProfile(accessToken, refreshToken),
+            fetchGallery(accessToken, refreshToken)
+          ]);
+        } else {
+          await fetchProfile(accessToken, refreshToken);
+        }
+      }
+    } catch (err) {
+      console.error('Refresh error:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
-    <ScrollView style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <Header title="Artists" showSearch={false} />
+      <ScrollView 
+        style={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#000']} // Android
+            tintColor="#000" // iOS
+          />
+        }
+      >
 
       <View style={styles.profileSection}>
         {backgroundImage ? (
@@ -493,17 +554,19 @@ export default function ProfileScreen() {
         <Text style={styles.detail}>About: {about}</Text>
       </View>
 
-      {/* Artwork Galleries - horizontal, view-only (no add button) */}
-      <>
-        <Text style={styles.sectionTitle}>Artwork Galleries</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.galleryRow}>
-          {galleryImages.map((art, index) => (
-            <TouchableOpacity key={index} onPress={() => setSelectedArt(art)}>
-              <Image source={{ uri: art.image }} style={styles.galleryItem} />
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </>
+      {/* Artwork Galleries - horizontal, view-only (no add button) - only show if artworks exist */}
+      {galleryImages.length > 0 && (
+        <>
+          <Text style={styles.sectionTitle}>Artwork Galleries</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.galleryRow}>
+            {galleryImages.map((art, index) => (
+              <TouchableOpacity key={index} onPress={() => setSelectedArt(art)}>
+                <Image source={{ uri: art.image }} style={styles.galleryItem} />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </>
+      )}
 
       {/* Artwork Details Modal */}
       <Modal visible={selectedArt !== null} transparent animationType="fade" onRequestClose={() => setSelectedArt(null)}>
@@ -607,13 +670,15 @@ export default function ProfileScreen() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 // All needed style (removed styles for profile/apply modals and buttons for them)
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
+  scrollContent: { flex: 1 },
   profileSection: { alignItems: "center", marginTop: 10, padding: 0 },
   backgroundImage: { width: "100%", height: 150, borderTopLeftRadius: 15, borderTopRightRadius: 15, resizeMode: "cover", marginBottom: -50 },
   avatarContainer: { position: "relative", top: -50, alignItems: "center" },
@@ -638,7 +703,7 @@ const styles = StyleSheet.create({
   changePhotoText: { textAlign: "center", color: "#007BFF", marginTop: 5, marginBottom: 10 },
   input: { backgroundColor: "#f9f9f9", borderWidth: 1, borderColor: "#ccc", borderRadius: 10, padding: 10, marginVertical: 5, width: "100%" },
   modalButtons: { flexDirection: "row", justifyContent: "space-between", marginTop: 15, width: "100%" },
-  saveButton: { backgroundColor: "black", paddingVertical: 8, paddingHorizontal: 25, borderRadius: 20 },
+  saveButton: { backgroundColor: "#A68C7B", paddingVertical: 8, paddingHorizontal: 25, borderRadius: 20 },
   saveButtonText: { color: "#fff", fontWeight: "bold" },
   cancelButton: { backgroundColor: "#eee", paddingVertical: 8, paddingHorizontal: 25, borderRadius: 20 },
   cancelButtonText: { color: "black", fontWeight: "bold" },
