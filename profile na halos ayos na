@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { View, Text, Image, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, Platform, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, Alert, } from "react-native";
+import { View, Text, Image, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, Platform, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, Alert, RefreshControl, SafeAreaView } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -58,6 +58,7 @@ export default function ProfileScreen() {
   const [artLikesCount, setArtLikesCount] = useState(0);
   const [artUserLiked, setArtUserLiked] = useState(false);
   const [artNewComment, setArtNewComment] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
   // Apply as Artist modal state
   const [applyModalVisible, setApplyModalVisible] = useState(false);
@@ -620,6 +621,26 @@ export default function ProfileScreen() {
     }, [role, accessToken, refreshToken])
   );
 
+  // Pull to refresh handler
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const r = String(role || '').toLowerCase();
+      if (r === 'artist' || r === 'admin') {
+        await Promise.all([
+          fetchProfile(accessToken, refreshToken),
+          fetchGallery(accessToken, refreshToken)
+        ]);
+      } else {
+        await fetchProfile(accessToken, refreshToken);
+      }
+    } catch (err) {
+      console.error('Refresh error:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -721,8 +742,19 @@ export default function ProfileScreen() {
 
 
   return (
-    <ScrollView style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <Header title="Profile" showSearch={false} />
+      <ScrollView 
+        style={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#000']} // Android
+            tintColor="#000" // iOS
+          />
+        }
+      >
 
 
       {/* Profile Section */}
@@ -1217,13 +1249,15 @@ export default function ProfileScreen() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
+  scrollContent: { flex: 1 },
   profileSection: { alignItems: "center", marginTop: 10, padding: 0 },
   backgroundImage: {
     width: "100%",
@@ -1343,7 +1377,7 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   saveButton: {
-    backgroundColor: "black",
+    backgroundColor: "#A68C7B",
     paddingVertical: 8,
     paddingHorizontal: 25,
     borderRadius: 20,
