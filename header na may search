@@ -458,7 +458,7 @@ const styles = StyleSheet.create({
   },
   notifHeaderTitle: { fontSize: 16, fontWeight: '600', marginRight: 8 },
   notifChip: {
-    backgroundColor: '#6200EE',
+    backgroundColor: '#A68C7B',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 10,
@@ -466,7 +466,7 @@ const styles = StyleSheet.create({
   },
   notifChipText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   notifMarkBtn: { marginLeft: 'auto' },
-  notifMarkBtnText: { color: '#6200EE', fontSize: 12, fontWeight: '600' },
+  notifMarkBtnText: { color: '#A68C7B', fontSize: 12, fontWeight: '600' },
   notifItem: {
     marginBottom: 10,
     fontSize: 14,
