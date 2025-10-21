@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View, Text, SafeAreaView, Image, ScrollView, TouchableOpacity } from 'react-native';
+import { StyleSheet, View, Text, SafeAreaView, Image, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../components/Header'; // Import the reusable Header
 import { supabase } from "../../supabase/supabaseClient";
@@ -32,66 +32,64 @@ const ArtistsScreen = () => {
   const [refreshToken, setRefreshToken] = useState(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchArtists = async (at, rt) => {
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_BASE}/artist/getArtist`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': `access_token=${at || ''}; refresh_token=${rt || ''}`,
+        },
+      });
+
+      if (!res.ok) {
+        console.warn('[artists.js] Failed to fetch artists:', res.status, res.statusText);
+        return; // Keep empty list on failure
+      }
+
+      const json = await res.json();
+      const list = Array.isArray(json?.artists) ? json.artists : [];
+      if (list.length) {
+        const mappedArtists = list.map((a) => ({
+          id: a.id || a.username || String(Math.random()),
+          username: a.username || null,
+          name: a.name || a.username || 'Untitled Artist',
+          image: a.hero || a.image || null,
+          createdAt: a.createdAt || a.created_at || a.createdTime || null,
+        }));
+        
+        // Sort by newest first
+        const sortedArtists = mappedArtists.sort((a, b) => {
+          const dateA = new Date(a.createdAt || 0).getTime();
+          const dateB = new Date(b.createdAt || 0).getTime();
+          return dateB - dateA; // Newest first (descending)
+        });
+        
+        setArtists(sortedArtists);
+      } else {
+        setArtists([]);
+      }
+    } catch (e) {
+      console.warn('[artists.js] Error fetching artists:', e?.message || e);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    let isMounted = true;
-
     const initAndFetch = async () => {
-      try {
-        const { data } = await supabase.auth.getSession();
-        const at = data?.session?.access_token || null;
-        const rt = data?.session?.refresh_token || null;
-        if (isMounted) {
-          setAccessToken(at);
-          setRefreshToken(rt);
-        }
-
-        // Fetch artists using Cookie header
-        setLoading(true);
-        const res = await fetch(`${API_BASE}/artist/getArtist`, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'Cookie': `access_token=${at || ''}; refresh_token=${rt || ''}`,
-          },
-        });
-
-        if (!res.ok) {
-          console.warn('[artists.js] Failed to fetch artists:', res.status, res.statusText);
-          return; // Keep empty list on failure
-        }
-
-        const json = await res.json();
-        const list = Array.isArray(json?.artists) ? json.artists : [];
-        if (isMounted && list.length) {
-          const mappedArtists = list.map((a) => ({
-            id: a.id || a.username || String(Math.random()),
-            username: a.username || null,
-            name: a.name || a.username || 'Untitled Artist',
-            image: a.hero || a.image || null,
-            createdAt: a.createdAt || a.created_at || a.createdTime || null,
-          }));
-          
-          // Sort by newest first
-          const sortedArtists = mappedArtists.sort((a, b) => {
-            const dateA = new Date(a.createdAt || 0).getTime();
-            const dateB = new Date(b.createdAt || 0).getTime();
-            return dateB - dateA; // Newest first (descending)
-          });
-          
-          setArtists(sortedArtists);
-        } else if (isMounted) {
-          setArtists([]);
-        }
-      } catch (e) {
-        console.warn('[artists.js] Error fetching artists:', e?.message || e);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
+      const { data } = await supabase.auth.getSession();
+      const at = data?.session?.access_token || null;
+      const rt = data?.session?.refresh_token || null;
+      setAccessToken(at);
+      setRefreshToken(rt);
+      await fetchArtists(at, rt);
     };
 
     initAndFetch();
-    return () => { isMounted = false; };
   }, [API_BASE]);
 
   // Filter artists based on search query
@@ -107,13 +105,35 @@ const ArtistsScreen = () => {
     setSearchQuery(text);
   };
 
+  // Pull to refresh handler
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await fetchArtists(accessToken, refreshToken);
+    } catch (err) {
+      console.error('Refresh error:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Reusable Header with search */}
       <Header title="Artists" showSearch={true} onSearch={handleSearch} />
 
       {/* Artist Grid */}
-      <ScrollView style={styles.artistGrid}>
+      <ScrollView 
+        style={styles.artistGrid}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#000']} // Android
+            tintColor="#000" // iOS
+          />
+        }
+      >
         {loading && artists.length === 0 ? (
           <Text style={{ margin: 12 }}>Loading...</Text>
         ) : null}
@@ -222,4 +242,3 @@ const styles = StyleSheet.create({
 });
 
 export default ArtistsScreen;
-
