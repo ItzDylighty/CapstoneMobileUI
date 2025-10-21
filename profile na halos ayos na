@@ -75,6 +75,7 @@ export default function ProfileScreen() {
   const [appValidIdImage, setAppValidIdImage] = useState(null); // { uri }
   const [appSelfieImage, setAppSelfieImage] = useState(null);   // { uri }
   const [appSubmitting, setAppSubmitting] = useState(false);
+  const [hasPendingRequest, setHasPendingRequest] = useState(false);
 
 
   // Function to upload artwork image to the backend and refresh gallery
@@ -373,21 +374,28 @@ export default function ProfileScreen() {
         rt = data?.session?.refresh_token || rt;
       }
 
+      // Build multipart form data to mirror the web submission to admin
       const fd = new FormData();
+      fd.append('requestType', 'artist_verification');
       fd.append('firstName', String(appFirstName));
-      fd.append('middleInitial', String(appMiddleInitial));
+      fd.append('midInit', String(appMiddleInitial || ''));
       fd.append('lastName', String(appLastName));
       fd.append('phone', String(appPhone));
       fd.append('age', String(appAge));
       fd.append('sex', String(appSex));
       fd.append('birthdate', new Date(appBirthdate).toISOString());
       fd.append('address', String(appAddress));
-      // files
-      fd.append('validId', { uri: appValidIdImage.uri, name: 'valid_id.jpg', type: 'image/jpeg' });
-      fd.append('selfie', { uri: appSelfieImage.uri, name: 'selfie.jpg', type: 'image/jpeg' });
+      // Optional fields to match web (empty if not used in RN UI)
+      fd.append('portfolio', '');
+      fd.append('bio', '');
+      // Consent required by web flow; RN UI has no toggle, so set true to match web behavior
+      fd.append('consent', 'true');
+      // Files must be under field names 'file' and 'file2' as in the web app
+      fd.append('file', { uri: appValidIdImage.uri, name: 'valid_id.jpg', type: 'image/jpeg' });
+      fd.append('file2', { uri: appSelfieImage.uri, name: 'selfie.jpg', type: 'image/jpeg' });
 
-      const endpoint = `${API_BASE}/artist/apply`;
-      console.log('[profile.js] Submitting artist application to:', endpoint);
+      const endpoint = `${API_BASE}/request/registerAsArtist`;
+      console.log('[profile.js] Submitting artist application to (admin/web route):', endpoint);
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { Cookie: `access_token=${at}; refresh_token=${rt}` },
@@ -397,6 +405,8 @@ export default function ProfileScreen() {
       console.log('[profile.js] Application response:', res.status, bodyText);
       if (!res.ok) throw new Error(bodyText || 'Application failed');
 
+      // Trigger existing refresh logic to update profile/gallery state
+      try { await onRefresh(); } catch (_) {}
       Alert.alert('Submitted', 'Your application has been submitted.');
       setApplyModalVisible(false);
     } catch (e) {
@@ -441,6 +451,41 @@ export default function ProfileScreen() {
     }
   };
 
+  // Check if user has a pending artist verification request
+  const checkPendingRequest = async (at, rt) => {
+    try {
+      const res = await fetch(`${API_BASE}/request/getRequest`, {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Cookie: `access_token=${at}; refresh_token=${rt}`,
+        },
+      });
+      if (!res.ok) {
+        setHasPendingRequest(false);
+        return false;
+      }
+      const data = await res.json();
+      
+      // Check if there's a pending artist_verification request
+      if (data?.requests && Array.isArray(data.requests)) {
+        const pendingArtistRequest = data.requests.find(
+          req => req.requestType === 'artist_verification' && req.status === 'pending'
+        );
+        const hasPending = !!pendingArtistRequest;
+        setHasPendingRequest(hasPending);
+        console.log("[profile.js] Pending artist request:", hasPending);
+        return hasPending;
+      }
+      setHasPendingRequest(false);
+      return false;
+    } catch (error) {
+      console.error("[profile.js] Error checking pending request:", error?.message || error);
+      setHasPendingRequest(false);
+      return false;
+    }
+  };
+
 
   useEffect(() => {
     const init = async () => {
@@ -455,6 +500,7 @@ export default function ProfileScreen() {
         if (at && rt) {
           const r = await fetchRole(at, rt);
           await fetchProfile(at, rt);
+          await checkPendingRequest(at, rt);
           if (String(r || '').toLowerCase() === 'artist' || String(r || '').toLowerCase() === 'admin') {
             await fetchGallery(at, rt);
           } else {
@@ -625,14 +671,21 @@ export default function ProfileScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      const r = String(role || '').toLowerCase();
+      // Fetch role first to get the latest role from backend
+      const updatedRole = await fetchRole(accessToken, refreshToken);
+      const r = String(updatedRole || '').toLowerCase();
+      
       if (r === 'artist' || r === 'admin') {
         await Promise.all([
           fetchProfile(accessToken, refreshToken),
-          fetchGallery(accessToken, refreshToken)
+          fetchGallery(accessToken, refreshToken),
+          checkPendingRequest(accessToken, refreshToken)
         ]);
       } else {
-        await fetchProfile(accessToken, refreshToken);
+        await Promise.all([
+          fetchProfile(accessToken, refreshToken),
+          checkPendingRequest(accessToken, refreshToken)
+        ]);
       }
     } catch (err) {
       console.error('Refresh error:', err);
@@ -880,33 +933,51 @@ export default function ProfileScreen() {
         <Text style={styles.detail}>About: {about}</Text>
 
 
-        <View style={styles.buttonRow}>
-          <TouchableOpacity
-            style={styles.button}
-            onPress={() => {
-              setTempImage(image);
-              setTempBackgroundImage(backgroundImage);
-              setTempFirstName(firstName);
-              setTempMiddleName(middleName);
-              setTempLastName(lastName);
-              setTempUserNameField(userNameField || username);
-              setTempSex(sex);
-              setTempBirthday(birthday || new Date());
-              setTempAddress(address);
-              setTempBio(bio);
-              setTempAbout(about);
-              setModalVisible(true);
-            }}
-          >
-            <Text style={styles.buttonText}>Edit Profile</Text>
-          </TouchableOpacity>
+        <View style={styles.buttonContainer}>
+          <View style={styles.buttonRow}>
+            <TouchableOpacity
+              style={styles.button}
+              onPress={() => {
+                setTempImage(image);
+                setTempBackgroundImage(backgroundImage);
+                setTempFirstName(firstName);
+                setTempMiddleName(middleName);
+                setTempLastName(lastName);
+                setTempUserNameField(userNameField || username);
+                setTempSex(sex);
+                setTempBirthday(birthday || new Date());
+                setTempAddress(address);
+                setTempBio(bio);
+                setTempAbout(about);
+                setModalVisible(true);
+              }}
+            >
+              <Text style={styles.buttonText}>Edit Profile</Text>
+            </TouchableOpacity>
+            {(() => {
+              const r = String(role ?? '').trim().toLowerCase();
+              // Hide button only if: user is artist/admin
+              const isArtistOrAdmin = r === 'artist' || r === 'admin';
+              const shouldShow = !isArtistOrAdmin;
+              return shouldShow;
+            })() && (
+              <TouchableOpacity 
+                style={[styles.button, hasPendingRequest && { opacity: 0.5 }]} 
+                onPress={handleApplyAsArtist}
+                disabled={hasPendingRequest}
+              >
+                <Text style={styles.buttonText}>Apply as Artist</Text>
+              </TouchableOpacity>
+            )}
+          </View>
           {(() => {
             const r = String(role ?? '').trim().toLowerCase();
-            // Show when role is unknown (initial load) or explicitly not artist/admin
-            return !r || !(r === 'artist' || r === 'admin');
+            const isArtistOrAdmin = r === 'artist' || r === 'admin';
+            // Only show pending button if user has pending request AND is not already artist/admin
+            return hasPendingRequest && !isArtistOrAdmin;
           })() && (
-            <TouchableOpacity style={styles.button} onPress={handleApplyAsArtist}>
-              <Text style={styles.buttonText}>Apply as Artist</Text>
+            <TouchableOpacity style={[styles.button, styles.pendingButton, styles.fullWidthButton]} disabled>
+              <Text style={styles.buttonText}>✓ Verification Pending</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -1277,7 +1348,11 @@ const styles = StyleSheet.create({
   },
   name: { fontSize: 20, fontWeight: "bold", marginTop: -30 },
   detail: { fontSize: 14, color: "#444", textAlign: "center", marginVertical: 2 },
-  buttonRow: { flexDirection: "row", marginTop: 10 },
+  buttonContainer: { 
+    alignItems: "center", 
+    marginTop: 10 
+  },
+  buttonRow: { flexDirection: "row" },
   button: {
     backgroundColor: "#eee",
     paddingVertical: 8,
@@ -1286,6 +1361,13 @@ const styles = StyleSheet.create({
     marginHorizontal: 5,
   },
   buttonText: { fontSize: 14, fontWeight: "600" },
+  fullWidthButton: {
+    marginTop: 10,
+    alignSelf: "stretch",
+    marginHorizontal: 5,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: "bold",
@@ -1433,5 +1515,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,
+  },
+  pendingButton: {
+    backgroundColor: '#FFC107',
+    opacity: 0.8,
   },
 });
