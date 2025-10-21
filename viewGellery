@@ -1,0 +1,651 @@
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, ScrollView, TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Alert, RefreshControl } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { supabase } from "../../supabase/supabaseClient";
+import Header from '../components/Header';
+
+const API_BASE = "http://192.168.254.114:3000/api";
+const API_ORIGIN = API_BASE.replace(/\/api$/, "");
+
+const ViewGalleryScreen = () => {
+  const { artworkId } = useLocalSearchParams();
+  const router = useRouter();
+  const [artwork, setArtwork] = useState(null);
+  const [comments, setComments] = useState([]);
+  const [newComment, setNewComment] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [liked, setLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
+  const [viewCount, setViewCount] = useState(0);
+  const [zoomImage, setZoomImage] = useState(null);
+  const [submittingComment, setSubmittingComment] = useState(false);
+
+  const loadSession = async () => {
+    const { data } = await supabase.auth.getSession();
+    return {
+      at: data?.session?.access_token || null,
+      rt: data?.session?.refresh_token || null,
+    };
+  };
+
+  const fetchArtworkDetails = async () => {
+    try {
+      const { at, rt } = await loadSession();
+      const res = await fetch(`${API_BASE}/gallery/artworks?page=1&limit=100`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json', Cookie: `access_token=${at}; refresh_token=${rt}` },
+      });
+      const data = await res.json();
+      
+      if (data.success && data.artworks) {
+        // Try both string and number comparison
+        const foundArtwork = data.artworks.find(art => 
+          art.id === parseInt(artworkId) || art.id === artworkId || String(art.id) === String(artworkId)
+        );
+        
+        if (foundArtwork) {
+          setArtwork(foundArtwork);
+          // Fetch stats for this artwork (don't await to avoid blocking)
+          fetchLikes(foundArtwork.id);
+          fetchViews(foundArtwork.id);
+          trackView(foundArtwork.id);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching artwork:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLikes = async (galleryArtId) => {
+    try {
+      const { at, rt } = await loadSession();
+      const url = `${API_BASE}/gallery/react?galleryArtId=${galleryArtId}`;
+      
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json', Cookie: `access_token=${at}; refresh_token=${rt}` },
+      });
+      
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('Likes API failed:', res.status, text);
+        setLikeCount(0);
+        setLiked(false);
+        return;
+      }
+      
+      const data = await res.json();
+      
+      // Backend returns { reactions: [...] }
+      if (data.reactions) {
+        const reactionCount = data.reactions.length;
+        // Check if current user has reacted
+        const currentUser = await supabase.auth.getUser();
+        const currentUserId = currentUser.data?.user?.id;
+        const userReacted = data.reactions.some(r => r.userId === currentUserId);
+        setLikeCount(reactionCount);
+        setLiked(userReacted);
+      } else {
+        setLikeCount(0);
+        setLiked(false);
+      }
+    } catch (error) {
+      console.error('Error fetching likes:', error);
+      setLikeCount(0);
+      setLiked(false);
+    }
+  };
+
+  const fetchViews = async (galleryArtId) => {
+    try {
+      const { at, rt } = await loadSession();
+      const url = `${API_BASE}/gallery/views?galleryArtId=${galleryArtId}`;
+      
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json', Cookie: `access_token=${at}; refresh_token=${rt}` },
+      });
+      
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('Views API failed:', res.status, text);
+        setViewCount(0);
+        return;
+      }
+      
+      const data = await res.json();
+      
+      // Backend returns { viewCount: number }
+      if (data.viewCount !== undefined) {
+        setViewCount(data.viewCount);
+      } else {
+        setViewCount(0);
+      }
+    } catch (error) {
+      console.error('Error fetching views:', error);
+      setViewCount(0);
+    }
+  };
+
+  const trackView = async (galleryArtId) => {
+    try {
+      const { at, rt } = await loadSession();
+      await fetch(`${API_BASE}/gallery/view`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: `access_token=${at}; refresh_token=${rt}` },
+        body: JSON.stringify({ galleryArtId }),
+      });
+    } catch (error) {
+      console.error('Error tracking view:', error);
+    }
+  };
+
+  const fetchComments = async () => {
+    try {
+      if (!artworkId) return;
+      const { at, rt } = await loadSession();
+      const url = `${API_BASE}/gallery/comments?galleryArtId=${artworkId}`;
+      
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json', Cookie: `access_token=${at}; refresh_token=${rt}` },
+      });
+      
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('Comments API failed:', res.status, text);
+        setComments([]);
+        return;
+      }
+      
+      const data = await res.json();
+      
+      // Backend returns { comments: [...] } or array directly
+      const commentsArray = data.comments || (Array.isArray(data) ? data : []);
+      setComments(commentsArray);
+    } catch (error) {
+      console.error('Error fetching comments:', error);
+      setComments([]);
+    }
+  };
+
+  useEffect(() => {
+    if (artworkId) {
+      fetchArtworkDetails();
+      fetchComments();
+    } else {
+      setLoading(false);
+      Alert.alert('Error', 'No artwork ID provided');
+    }
+  }, [artworkId]);
+
+  const handleLike = async () => {
+    if (!artwork) return;
+    // Optimistic update
+    const wasLiked = liked;
+    const previousCount = likeCount;
+    setLiked(!liked);
+    setLikeCount(liked ? likeCount - 1 : likeCount + 1);
+    
+    try {
+      const { at, rt } = await loadSession();
+      const res = await fetch(`${API_BASE}/gallery/react`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: `access_token=${at}; refresh_token=${rt}` },
+        body: JSON.stringify({ galleryArtId: artwork.id }),
+      });
+      const data = await res.json();
+      // Backend returns reaction object or removal confirmation
+      if (res.ok) {
+        // Refetch to get accurate count
+        await fetchLikes(artwork.id);
+      }
+    } catch (error) {
+      console.error('Error toggling like:', error);
+      // Revert on error
+      setLiked(wasLiked);
+      setLikeCount(previousCount);
+    }
+  };
+
+  const handlePostComment = async () => {
+    if (!newComment.trim() || !artwork) return;
+    setSubmittingComment(true);
+    try {
+      const { at, rt } = await loadSession();
+      const res = await fetch(`${API_BASE}/gallery/comment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: `access_token=${at}; refresh_token=${rt}` },
+        body: JSON.stringify({ 
+          galleryArtId: artwork.id,
+          text: newComment.trim()
+        }),
+      });
+      const data = await res.json();
+      // Check if response is successful (may return comment object directly)
+      if (res.ok) {
+        setNewComment('');
+        // Refresh comments to show the new one
+        await fetchComments();
+      } else {
+        Alert.alert('Error', data.error || data.message || 'Failed to post comment');
+      }
+    } catch (error) {
+      console.error('Error posting comment:', error);
+      Alert.alert('Error', 'Failed to post comment');
+    } finally {
+      setSubmittingComment(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        fetchArtworkDetails(),
+        fetchComments()
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const resolveImageUrl = (imageData) => {
+    if (!imageData) return null;
+    const imageUrl = Array.isArray(imageData) ? imageData[0] : imageData;
+    if (!imageUrl) return null;
+    return imageUrl.startsWith('http') ? imageUrl : `${API_ORIGIN}${imageUrl}`;
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  };
+
+  const renderComment = (item) => {
+    // Backend returns: { id, user: "Name", comment: "text", timestamp: "date", avatar: "url" }
+    const userName = item.user || 'Anonymous';
+    const commentText = item.comment || item.text || '';
+    const commentDate = item.timestamp || item.datePosted || item.createdAt;
+    
+    return (
+      <View style={styles.commentContainer} key={item.id}>
+        {item.avatar ? (
+          <Image source={{ uri: item.avatar }} style={styles.commentAvatar} />
+        ) : (
+          <View style={styles.commentAvatar} />
+        )}
+        <View style={styles.commentContent}>
+          <View style={styles.commentHeader}>
+            <Text style={styles.commentName}>{userName}</Text>
+            <Text style={styles.commentDate}>{commentDate || 'N/A'}</Text>
+          </View>
+          <Text style={styles.commentText}>{commentText}</Text>
+        </View>
+      </View>
+    );
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Header title="Gallery" showSearch={false} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#A68C7B" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!artwork) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Header title="Gallery" showSearch={false} />
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle-outline" size={64} color="#A68C7B" />
+          <Text style={styles.errorText}>Artwork not found</Text>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <Text style={styles.backButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <Header title="Gallery" showSearch={false} />
+
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={90}
+      >
+        <ScrollView 
+          contentContainerStyle={styles.content}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#A68C7B']}
+              tintColor="#A68C7B"
+            />
+          }
+        >
+          {/* Artwork Image */}
+          <TouchableOpacity 
+            style={styles.imageContainer} 
+            onPress={() => setZoomImage({ uri: resolveImageUrl(artwork.image) })}
+          >
+            <Image
+              source={{ uri: resolveImageUrl(artwork.image) }}
+              style={styles.artworkImage}
+              defaultSource={require('../../assets/icon.png')}
+            />
+          </TouchableOpacity>
+
+          {/* Title and Artist */}
+          <View style={styles.section}>
+            <Text style={styles.artworkTitle}>{artwork.title || 'Untitled'}</Text>
+            <Text style={styles.artistName}>by {artwork.artist || 'Unknown Artist'}</Text>
+          </View>
+
+          <View style={styles.separator} />
+
+          {/* Details: Medium, Categories, Date */}
+          <View style={styles.section}>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Medium:</Text>
+              <Text style={styles.detailValue}>{artwork.medium || 'N/A'}</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Categories:</Text>
+              <Text style={styles.detailValue}>
+                {Array.isArray(artwork.categories) ? artwork.categories.join(', ') : 'N/A'}
+              </Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Date Added:</Text>
+              <Text style={styles.detailValue}>{formatDate(artwork.datePosted)}</Text>
+            </View>
+          </View>
+
+          {/* Description */}
+          <View style={styles.section}>
+            <Text style={styles.descriptionText}>
+              {artwork.description || 'No description available.'}
+            </Text>
+          </View>
+
+          <View style={styles.separator} />
+
+          {/* Stats: Heart, Views, Comments */}
+          <View style={styles.statsContainer}>
+            <TouchableOpacity style={styles.statItem} onPress={handleLike}>
+              <Ionicons 
+                name={liked ? 'heart' : 'heart-outline'} 
+                size={24} 
+                color={liked ? '#A68C7B' : '#666'} 
+              />
+              <Text style={styles.statText}>{likeCount}</Text>
+            </TouchableOpacity>
+            <View style={styles.statItem}>
+              <Ionicons name="eye-outline" size={24} color="#666" />
+              <Text style={styles.statText}>{viewCount}</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Ionicons name="chatbubble-outline" size={24} color="#666" />
+              <Text style={styles.statText}>{comments.length}</Text>
+            </View>
+          </View>
+
+          <View style={styles.separator} />
+
+          {/* Comments Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Comments</Text>
+            {comments.length === 0 ? (
+              <View style={styles.emptyCommentsContainer}>
+                <Ionicons name="chatbubbles-outline" size={48} color="#A68C7B" style={{ marginBottom: 8 }} />
+                <Text style={styles.emptyCommentsText}>No comments yet</Text>
+                <Text style={styles.emptyCommentsSubtext}>Be the first to comment!</Text>
+              </View>
+            ) : (
+              comments.map(renderComment)
+            )}
+          </View>
+
+          {/* Comment Input */}
+          <View style={styles.commentInputSection}>
+            <TextInput
+              style={styles.commentInput}
+              placeholder="Share your thoughts about this artwork..."
+              multiline
+              value={newComment}
+              onChangeText={setNewComment}
+            />
+            <TouchableOpacity 
+              style={[styles.postCommentButton, submittingComment && styles.disabledButton]} 
+              onPress={handlePostComment}
+              disabled={submittingComment || !newComment.trim()}
+            >
+              <Text style={styles.postCommentButtonText}>
+                {submittingComment ? 'Posting...' : 'Post Comment'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Full-screen image modal */}
+      <Modal
+        visible={zoomImage !== null}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setZoomImage(null)}
+      >
+        <TouchableOpacity style={styles.fullScreenContainer} onPress={() => setZoomImage(null)}>
+          <Image source={zoomImage} style={styles.fullScreenImage} resizeMode="contain" />
+        </TouchableOpacity>
+      </Modal>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff' },
+  content: { paddingBottom: 20 },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 18,
+    color: '#A68C7B',
+    marginTop: 16,
+    marginBottom: 24,
+  },
+  backButton: {
+    backgroundColor: '#A68C7B',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 25,
+  },
+  backButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  imageContainer: {
+    width: '100%',
+    backgroundColor: '#f0f0f0',
+  },
+  artworkImage: {
+    width: '100%',
+    height: 300,
+    resizeMode: 'cover',
+  },
+  section: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  artworkTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#000',
+    marginBottom: 4,
+  },
+  artistName: {
+    fontSize: 16,
+    color: '#A68C7B',
+  },
+  separator: {
+    height: 1,
+    backgroundColor: '#e0e0e0',
+    marginHorizontal: 16,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  detailLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    width: 100,
+  },
+  detailValue: {
+    fontSize: 14,
+    color: '#666',
+    flex: 1,
+  },
+  descriptionText: {
+    fontSize: 15,
+    color: '#333',
+    lineHeight: 22,
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 24,
+  },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  statText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000',
+    marginBottom: 16,
+  },
+  emptyCommentsContainer: {
+    alignItems: 'center',
+    paddingVertical: 32,
+  },
+  emptyCommentsText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#A68C7B',
+    marginBottom: 4,
+  },
+  emptyCommentsSubtext: {
+    fontSize: 14,
+    color: '#999',
+  },
+  commentContainer: {
+    flexDirection: 'row',
+    marginBottom: 16,
+    alignItems: 'flex-start',
+  },
+  commentAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#e0e0e0',
+    marginRight: 12,
+  },
+  commentContent: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    padding: 12,
+    borderRadius: 12,
+  },
+  commentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  commentName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000',
+  },
+  commentDate: {
+    fontSize: 12,
+    color: '#999',
+  },
+  commentText: {
+    fontSize: 14,
+    color: '#333',
+    lineHeight: 20,
+  },
+  commentInputSection: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  commentInput: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 15,
+    minHeight: 80,
+    textAlignVertical: 'top',
+    marginBottom: 12,
+  },
+  postCommentButton: {
+    backgroundColor: '#A68C7B',
+    paddingVertical: 14,
+    borderRadius: 25,
+    alignItems: 'center',
+  },
+  postCommentButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  disabledButton: {
+    opacity: 0.6,
+  },
+  fullScreenContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullScreenImage: {
+    width: '100%',
+    height: '100%',
+  },
+});
+
+export default ViewGalleryScreen;
