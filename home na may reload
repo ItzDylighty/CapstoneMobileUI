@@ -28,6 +28,11 @@ const HomeScreen = () => {
   const [role, setRole] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Art interests modal
+  const [interestsModalVisible, setInterestsModalVisible] = useState(false);
+  const [selectedInterests, setSelectedInterests] = useState([]);
+  const [hasArtPreferences, setHasArtPreferences] = useState(false);
 
 
   const [commentModalVisible, setCommentModalVisible] = useState(false);
@@ -84,6 +89,33 @@ const HomeScreen = () => {
   };
 
   
+  // Check if user has art preferences
+  const checkArtPreferences = async (at, rt) => {
+    try {
+      const res = await fetch(`${API_BASE}/gallery/getArtPreference`, {
+        method: "GET",
+        headers: {
+          'Cookie': `access_token=${at}; refresh_token=${rt}`,
+        },
+      });
+      const data = await res.json();
+      
+      if (data?.artPreference) {
+        // Check if user has selected at least one preference
+        const prefs = data.artPreference;
+        const hasPreferences = Object.keys(prefs).some(key => 
+          key !== 'userId' && key !== 'id' && key !== 'created_at' && prefs[key] === true
+        );
+        setHasArtPreferences(hasPreferences);
+        return hasPreferences;
+      }
+      return false;
+    } catch (err) {
+      console.log("checkArtPreferences error:", err?.message || err);
+      return false;
+    }
+  };
+
   // Fetch user profile from backend to determine if profile modal should show
   const fetchUserProfile = async (at, rt) => {
     try {
@@ -122,6 +154,12 @@ const HomeScreen = () => {
           setProfileModalVisible(true);
         } else {
           setProfileModalVisible(false);
+          // Check art preferences after profile is complete
+          const hasPrefs = await checkArtPreferences(at, rt);
+          if (!hasPrefs) {
+            // Show interests modal if no preferences set
+            setInterestsModalVisible(true);
+          }
         }
       } else {
         // No profile data found - require completion
@@ -223,11 +261,15 @@ const HomeScreen = () => {
           setProfileModalVisible(false);
           return true;
         }
+        if (interestsModalVisible) {
+          setInterestsModalVisible(false);
+          return true;
+        }
         return false; // allow default behavior
       };
       const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
       return () => sub.remove();
-    }, [selectedImage, selectedImages.length, commentModalVisible, modalVisible, profileModalVisible])
+    }, [selectedImage, selectedImages.length, commentModalVisible, modalVisible, profileModalVisible, interestsModalVisible])
   );
 
 
@@ -337,7 +379,6 @@ const HomeScreen = () => {
       const res = await fetch(`${API_BASE}/homepage/createPost`, {
         method: "POST",
         headers: {
-          // NOTE: do not set Content-Type manually with FormData in fetch; leaving it as-is is fine for RN fetch
           'Cookie': `access_token=${accessToken}; refresh_token=${refreshToken}`,
         },
         body: formData,
@@ -510,8 +551,6 @@ const HomeScreen = () => {
         });
       }
 
-
-      // Ensure all fields are appended as strings; send birthday as full ISO (parity with profile.js)
       const birthdayStr = birthday ? new Date(birthday).toISOString() : "";
       formData.append("firstName", String(firstName ?? ""));
       formData.append("middleName", String(middleName ?? ""));
@@ -527,7 +566,6 @@ const HomeScreen = () => {
       formData.append("about", String(about ?? ""));
 
 
-      // Debug summary of what we're about to send
       try {
         console.log("[home.js] updateProfile payload:", {
           firstName,
@@ -968,7 +1006,7 @@ const HomeScreen = () => {
           <View style={styles.modalBackground}>
             <TouchableWithoutFeedback>
               <View style={styles.modalCard}>
-                <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10 }}>Create Post</Text>
+                <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: '#A68C7B' }}>Create Post</Text>
                 <View style={styles.modalInputBox}>
                   {/* Show user's profile avatar if available; fallback keeps same size */}
                   {image ? (
@@ -1040,6 +1078,14 @@ const HomeScreen = () => {
               data={currentPostComments}
               keyExtractor={(item) => item.id.toString()}
               renderItem={renderComment}
+              ListEmptyComponent={
+                <View style={styles.emptyCommentsContainer}>
+                  <Ionicons name="chatbubbles-outline" size={64} color="#A68C7B" style={{ marginBottom: 12 }} />
+                  <Text style={styles.emptyCommentsText}>No comments yet</Text>
+                  <Text style={styles.emptyCommentsSubtext}>Be the first to comment!</Text>
+                </View>
+              }
+              contentContainerStyle={currentPostComments.length === 0 ? { flex: 1 } : {}}
             />
             <View style={styles.commentInputContainer}>
               <TextInput
@@ -1229,6 +1275,131 @@ const HomeScreen = () => {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      {/* Art Interests Modal */}
+      <Modal visible={interestsModalVisible} animationType="fade" transparent>
+        <TouchableWithoutFeedback>
+          <View style={styles.modalOverlay}>
+            <View style={styles.interestsBox}>
+              <Text style={styles.modalTitle}>Choose Your Art Interests</Text>
+              <Text style={{ marginBottom: 10, color: '#555', textAlign: 'center' }}>Pick a few to personalize your feed</Text>
+              <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+                <View style={styles.interestsGrid}>
+                {[
+                  { id: 'classical', name: 'Classical Art', color: '#111' },
+                  { id: 'contemporary', name: 'Contemporary', color: '#6b21a8' },
+                  { id: 'impressionist', name: 'Impressionist', color: '#b45309' },
+                  { id: 'abstract', name: 'Abstract', color: '#047857' },
+                  { id: 'sculpture', name: 'Sculpture', color: '#1f2937' },
+                  { id: 'photography', name: 'Photography', color: '#0ea5e9' },
+                  { id: 'digital', name: 'Digital Art', color: '#7c3aed' },
+                  { id: 'street', name: 'Street Art', color: '#f59e0b' },
+                  { id: 'minimalist', name: 'Minimalist', color: '#4b5563' },
+                  { id: 'surrealist', name: 'Surrealist', color: '#ef4444' },
+                  { id: 'landscape', name: 'Landscape', color: '#10b981' },
+                  { id: 'portrait', name: 'Portrait', color: '#60a5fa' },
+                  { id: 'miniature', name: 'Miniature', color: '#f59e0b' },
+                  { id: 'expressionist', name: 'Expressionist', color: '#ef4444' },
+                  { id: 'realism', name: 'Realism', color: '#10b981' },
+                  { id: 'conceptual', name: 'Conceptual', color: '#0ea5e9' },
+                ].map((cat) => {
+                  const selected = selectedInterests.includes(cat.id);
+                  return (
+                    <TouchableOpacity
+                      key={cat.id}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        setSelectedInterests((prev) =>
+                          prev.includes(cat.id)
+                            ? prev.filter((x) => x !== cat.id)
+                            : [...prev, cat.id]
+                        );
+                      }}
+                      style={[styles.categoryCard, selected && { borderColor: cat.color, backgroundColor: '#f9fafb' }]}
+                    >
+                      <View style={[styles.categoryDot, { backgroundColor: cat.color }]} />
+                      <Text style={[styles.categoryText, selected && { color: cat.color }]} numberOfLines={1}>
+                        {cat.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                </View>
+                {!!selectedInterests.length && (
+                  <Text style={{ marginTop: 6, marginBottom: 10, color: '#111', fontWeight: '600', textAlign: 'center' }}>
+                    {selectedInterests.length} selected
+                  </Text>
+                )}
+              </ScrollView>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 15, gap: 10 }}>
+                <TouchableOpacity
+                  style={[styles.cancelButton, { flex: 1, alignItems: 'center', justifyContent: 'center' }]}
+                  onPress={() => setInterestsModalVisible(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Maybe later</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveButton, { flex: 1, backgroundColor: '#A68C7B', opacity: selectedInterests.length ? 1 : 0.5, alignItems: 'center', justifyContent: 'center' }]}
+                  disabled={!selectedInterests.length}
+                  onPress={async () => {
+                    const preferences = {
+                      classicalArt: selectedInterests.includes('classical'),
+                      contemporaryArt: selectedInterests.includes('contemporary'),
+                      impressionist: selectedInterests.includes('impressionist'),
+                      abstractArt: selectedInterests.includes('abstract'),
+                      sculpture: selectedInterests.includes('sculpture'),
+                      photography: selectedInterests.includes('photography'),
+                      digitalArt: selectedInterests.includes('digital'),
+                      streetArt: selectedInterests.includes('street'),
+                      minimalist: selectedInterests.includes('minimalist'),
+                      surrealist: selectedInterests.includes('surrealist'),
+                      landscape: selectedInterests.includes('landscape'),
+                      portrait: selectedInterests.includes('portrait'),
+                      miniature: selectedInterests.includes('miniature'),
+                      expressionist: selectedInterests.includes('expressionist'),
+                      realism: selectedInterests.includes('realism'),
+                      conceptual: selectedInterests.includes('conceptual'),
+                    };
+                    try {
+                      const res = await fetch(`${API_BASE}/profile/saveArtPreferences`, {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'Cookie': `access_token=${accessToken}; refresh_token=${refreshToken}`,
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify(preferences),
+                      });
+                      if (!res.ok) {
+                        let errMsg = `Failed to save preferences (${res.status})`;
+                        try {
+                          const txt = await res.text();
+                          try {
+                            const j = txt ? JSON.parse(txt) : null;
+                            if (j && (j.message || j.error)) errMsg = `${errMsg}: ${j.message || j.error}`;
+                            else if (txt) errMsg = `${errMsg}: ${txt}`;
+                          } catch {
+                            if (txt) errMsg = `${errMsg}: ${txt}`;
+                          }
+                        } catch {}
+                        throw new Error(errMsg);
+                      }
+                      setHasArtPreferences(true);
+                      setInterestsModalVisible(false);
+                    } catch (e) {
+                      console.log('saveArtPreferences error:', e?.message || e);
+                      alert(e?.message || 'Failed to save preferences');
+                    }
+                  }}
+                >
+                  <Text style={styles.saveButtonText}>Continue</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
     </SafeAreaView>
   );
 };
@@ -1299,7 +1470,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   addPhotoText: { color: 'black', fontSize: 12, marginTop: 4, fontWeight: '600' },
-  postButton: { backgroundColor: 'black', paddingVertical: 12, borderRadius: 25, alignItems: 'center', marginTop: 5 },
+  postButton: { backgroundColor: '#A68C7B', paddingVertical: 12, borderRadius: 25, alignItems: 'center', marginTop: 5 },
   postButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   card: {
     backgroundColor: 'white',
@@ -1335,7 +1506,23 @@ const styles = StyleSheet.create({
   },
   commentInputContainer: { flexDirection: 'row', padding: 10, borderTopWidth: 1, borderColor: '#eee' },
   commentInput: { flex: 1, backgroundColor: '#f0f2f5', borderRadius: 20, paddingHorizontal: 12 },
-  sendButton: { backgroundColor: 'black', borderRadius: 20, padding: 10, marginLeft: 8 },
+  sendButton: { backgroundColor: '#A68C7B', borderRadius: 20, padding: 10, marginLeft: 8 },
+  emptyCommentsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyCommentsText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#A68C7B',
+    marginBottom: 4,
+  },
+  emptyCommentsSubtext: {
+    fontSize: 14,
+    color: '#999',
+  },
 
 
   modalOverlay: {
@@ -1516,6 +1703,47 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     textAlign: 'center',
+  },
+  interestsBox: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 20,
+    width: '90%',
+    maxHeight: '80%',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+  },
+  interestsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  categoryCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fff',
+    width: '48%',
+    marginBottom: 8,
+  },
+  categoryDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
+  },
+  categoryText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    flex: 1,
   },
 });
 
