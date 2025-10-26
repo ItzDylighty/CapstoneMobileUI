@@ -12,6 +12,7 @@ import {
   Alert,
   BackHandler,
   Share,
+  RefreshControl,
 } from 'react-native';
 import Header from '../components/Header'; // Import the reusable Header
 import { supabase } from "../../supabase/supabaseClient";
@@ -34,6 +35,8 @@ const ViewEventsScreen = () => {
   const [pLoading, setPLoading] = useState(false);
   const [pError, setPError] = useState(null);
   const [removingId, setRemovingId] = useState(null);
+  const [attendeeCount, setAttendeeCount] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Ensure Android hardware back goes to Events screen
   useFocusEffect(
@@ -52,41 +55,76 @@ const ViewEventsScreen = () => {
     }, [router])
   );
 
+  const fetchEvent = async () => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const at = data?.session?.access_token || null;
+      const rt = data?.session?.refresh_token || null;
+      if (!at || !rt) {
+        Alert.alert('Authentication required', 'Please login to view event details.');
+        setLoading(false);
+        return;
+      }
+      const res = await fetch(`${API_BASE}/event/getEvents`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          'Cookie': `access_token=${at}; refresh_token=${rt}`,
+        },
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        const msg = json?.error || `Failed to load event (${res.status})`;
+        throw new Error(msg);
+      }
+      const list = Array.isArray(json) ? json : (json?.data || json?.events || []);
+      const found = list.find(e => String(e.eventId || e.id) === String(eventId));
+      setEvent(found || null);
+    } catch (e) {
+      console.warn('[viewEvents] fetch error:', e?.message || e);
+      Alert.alert('Error', e?.message || 'Failed to load event');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchEvent = async () => {
-      try {
+    fetchEvent();
+  }, [eventId]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await fetchEvent();
+      // Also refresh joined status and attendee count
+      if (eventId) {
         const { data } = await supabase.auth.getSession();
         const at = data?.session?.access_token || null;
         const rt = data?.session?.refresh_token || null;
-        if (!at || !rt) {
-          Alert.alert('Authentication required', 'Please login to view event details.');
-          setLoading(false);
-          return;
+        if (at && rt) {
+          const q = `${API_BASE}/event/isJoined?eventId=${encodeURIComponent(String(eventId))}`;
+          const res = await fetch(q, { method: 'GET', headers: { 'Cookie': `access_token=${at}; refresh_token=${rt}` } });
+          if (res.ok) {
+            const j = await res.json();
+            setJoined(!!j.joined);
+          }
+          const res2 = await fetch(`${API_BASE}/event/eventParticipants`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Cookie': `access_token=${at}; refresh_token=${rt}` },
+            body: JSON.stringify({ eventId })
+          });
+          if (res2.ok) {
+            const j2 = await res2.json();
+            setAttendeeCount(Array.isArray(j2.participants) ? j2.participants.length : 0);
+          }
         }
-        const res = await fetch(`${API_BASE}/event/getEvents`, {
-          method: 'GET',
-          headers: {
-            Accept: 'application/json',
-            'Cookie': `access_token=${at}; refresh_token=${rt}`,
-          },
-        });
-        const json = await res.json();
-        if (!res.ok) {
-          const msg = json?.error || `Failed to load event (${res.status})`;
-          throw new Error(msg);
-        }
-        const list = Array.isArray(json) ? json : (json?.data || json?.events || []);
-        const found = list.find(e => String(e.eventId || e.id) === String(eventId));
-        setEvent(found || null);
-      } catch (e) {
-        console.warn('[viewEvents] fetch error:', e?.message || e);
-        Alert.alert('Error', e?.message || 'Failed to load event');
-      } finally {
-        setLoading(false);
       }
-    };
-    fetchEvent();
-  }, [eventId]);
+    } catch (err) {
+      console.error('Refresh error:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     let abort = false;
@@ -107,6 +145,31 @@ const ViewEventsScreen = () => {
     run();
     return () => { abort = true; };
   }, [eventId]);
+
+  // Fetch attendee count
+  useEffect(() => {
+    let abort = false;
+    const run = async () => {
+      try {
+        if (!eventId) return;
+        const { data } = await supabase.auth.getSession();
+        const at = data?.session?.access_token || null;
+        const rt = data?.session?.refresh_token || null;
+        if (!at || !rt) return;
+        const res = await fetch(`${API_BASE}/event/eventParticipants`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Cookie': `access_token=${at}; refresh_token=${rt}` },
+          body: JSON.stringify({ eventId })
+        });
+        if (!res.ok) return;
+        const j = await res.json();
+        if (!abort) setAttendeeCount(Array.isArray(j.participants) ? j.participants.length : 0);
+      } catch {}
+    };
+    run();
+    return () => { abort = true; };
+  }, [eventId, joined]);
+
 
   useEffect(() => {
     let abort = false;
@@ -236,6 +299,7 @@ const ViewEventsScreen = () => {
     }
   };
 
+
   const fmt = (dt) => new Date(dt).toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   const isEventPast = (() => {
@@ -254,7 +318,18 @@ const ViewEventsScreen = () => {
           <ActivityIndicator size="large" color="#000" />
         </View>
       ) : (
-        <ScrollView ref={scrollRef} style={styles.scrollView}>
+        <ScrollView 
+          ref={scrollRef} 
+          style={styles.scrollView}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#000']} // Android
+              tintColor="#000" // iOS
+            />
+          }
+        >
           {/* Event Banner */}
           <TouchableOpacity
             style={{ ...styles.bannerContainer, marginTop: 5 }}
@@ -267,17 +342,30 @@ const ViewEventsScreen = () => {
                 <Ionicons name="image-outline" size={64} color="#9e9e9e" />
               </View>
             )}
-            {(event?.startsAt || event?.start || event?.venueName) ? (
+            {(event?.startsAt || event?.start || event?.venueName || isEventPast) ? (
               <View style={styles.bannerBadges}>
+                {isEventPast ? (
+                  <View style={[styles.badge, styles.endedBadge]}><Text style={[styles.badgeText, styles.endedBadgeText]}>Ended</Text></View>
+                ) : (
+                  <View style={[styles.badge, styles.liveBadge]}><Text style={[styles.badgeText, styles.liveBadgeText]}>Live</Text></View>
+                )}
                 {!!(event?.startsAt || event?.start) && (
-                  <View style={styles.badge}><Text style={styles.badgeText}>🗓️ {fmt(event.startsAt || event.start)}</Text></View>
+                  <View style={styles.badge}><Text style={styles.badgeText}><Ionicons name="calendar-outline" size={12} color="#333" /> {fmt(event.startsAt || event.start)}</Text></View>
                 )}
                 {!!event?.venueName && (
-                  <View style={styles.badge}><Text style={styles.badgeText}>📍 {event.venueName}</Text></View>
+                  <View style={styles.badge}><Text style={styles.badgeText}><Ionicons name="location-outline" size={12} color="#333" /> {event.venueName}</Text></View>
                 )}
               </View>
             ) : null}
           </TouchableOpacity>
+
+          {/* Stats Bar */}
+          <View style={styles.statsBar}>
+            <View style={styles.statItem}>
+              <Ionicons name="people-outline" size={20} color="#A68C7B" />
+              <Text style={styles.statText}>{attendeeCount} {attendeeCount === 1 ? 'Attendee' : 'Attendees'}</Text>
+            </View>
+          </View>
 
           {/* Buttons */}
           <View style={styles.buttonContainer}>
@@ -467,20 +555,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     bottom: 16,
-    right: 16,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
     gap: 8,
   },
   badge: {
     backgroundColor: 'rgba(255,255,255,0.9)',
     borderWidth: 1,
     borderColor: '#d4b48a',
-    borderRadius: 12,
+    borderRadius: 8,
     paddingVertical: 6,
     paddingHorizontal: 12,
-    marginRight: 8,
-    marginTop: 8,
   },
   badgeText: {
     fontSize: 12,
@@ -524,6 +609,42 @@ const styles = StyleSheet.create({
   },
   disabledBtn: {
     opacity: 0.6,
+  },
+  statsBar: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fafafa',
+  },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  statText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  liveBadge: {
+    backgroundColor: 'rgba(76, 175, 80, 0.9)',
+    borderColor: '#4CAF50',
+  },
+  liveBadgeText: {
+    color: '#fff',
+  },
+  endedBadge: {
+    backgroundColor: 'rgba(158, 158, 158, 0.9)',
+    borderColor: '#9e9e9e',
+  },
+  endedBadgeText: {
+    color: '#fff',
   },
   textSection: {
     paddingHorizontal: 20,
