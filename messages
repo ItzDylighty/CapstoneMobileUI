@@ -108,15 +108,18 @@ const MessagesScreen = () => {
       setCurrentUserId(uid);
 
       setLoading(true);
-      const res = await fetch(`${API_BASE}/message/getConversation`, {
+      // Add cache-busting timestamp to force fresh data
+      const timestamp = Date.now();
+      const res = await fetch(`${API_BASE}/message/getConversation?_t=${timestamp}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
           'Cookie': `access_token=${at || ''}; refresh_token=${rt || ''}`,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
         },
       });
       if (!res.ok) {
-        console.warn('[messages.js] Failed to fetch conversations:', res.status, res.statusText);
         setConversations([]);
         return;
       }
@@ -133,6 +136,8 @@ const MessagesScreen = () => {
           c.updatedAt || c.updated_at || null
         );
         const ts = normalizeTimestamp(tsRaw);
+        const unreadStatus = c.unread || c.hasUnread || c.unreadCount > 0 || false;
+        const unreadNum = c.unreadCount || 0;
         return {
           id: c.conversationId,
           otherUserId: other.id,
@@ -140,8 +145,8 @@ const MessagesScreen = () => {
           lastMessage: (c.lastMessage && (c.lastMessage.content || c.lastMessage.text)) || c.lastMessageContent || '',
           avatar: resolveUrl(other.profilePicture),
           lastMessageTime: ts,
-          unread: c.unread || c.hasUnread || c.unreadCount > 0 || false,
-          unreadCount: c.unreadCount || 0,
+          unread: unreadStatus,
+          unreadCount: unreadNum,
         };
       });
       // Sort by most recent message first
@@ -201,10 +206,18 @@ const MessagesScreen = () => {
     fetchConversations();
   }, [fetchConversations]);
 
-  // Refresh conversation list when screen comes into focus (e.g., after sending a message)
+  // Refresh conversation list when screen comes into focus (e.g., after reading a message)
   useFocusEffect(
     useCallback(() => {
+      // Force immediate refresh when returning to screen
       fetchConversations();
+      
+      // Also refresh after a short delay to catch any delayed updates
+      const timer = setTimeout(() => {
+        fetchConversations();
+      }, 500);
+      
+      return () => clearTimeout(timer);
     }, [fetchConversations])
   );
 
@@ -236,6 +249,8 @@ const MessagesScreen = () => {
         const refresh = () => { if (mounted) fetchConversations(); };
         socket.on('message:new', refresh);
         socket.on('conversation:updated', refresh);
+        socket.on('message:read', refresh); // Listen for read status updates
+        socket.on('messages:read', refresh); // Listen for bulk read updates
       } catch {}
     };
     setup();
