@@ -294,8 +294,12 @@ export default function ProfileScreen() {
 
   const submitArtwork = async () => {
     try {
+      if (!artTitle.trim()) {
+        Alert.alert('Error', 'Please enter a title');
+        return;
+      }
       if (!artImage?.uri) {
-        alert("Please select an artwork image.");
+        Alert.alert('Error', 'Please select an artwork image');
         return;
       }
       setArtUploading(true);
@@ -304,7 +308,12 @@ export default function ProfileScreen() {
         description: artDescription,
         medium: artMedium,
       });
+      Alert.alert('Success', 'Artwork uploaded successfully!');
       setArtModalVisible(false);
+      setArtImage(null);
+      setArtTitle('');
+      setArtDescription('');
+      setArtMedium('');
     } catch (e) {
       // uploadArtwork already alerts on failure
     } finally {
@@ -824,84 +833,103 @@ export default function ProfileScreen() {
         visible={applyModalVisible}
         animationType="slide"
         transparent
-        presentationStyle="overFullScreen"
         onRequestClose={() => setApplyModalVisible(false)}
       >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={styles.modalOverlay}>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
-              <ScrollView contentContainerStyle={styles.modalBox} keyboardShouldPersistTaps="handled">
-                <Text style={styles.modalTitle}>Apply as Artist</Text>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <View style={styles.uploadModalOverlay}>
+            <View style={styles.uploadModalContent}>
+              <View style={styles.uploadModalHeader}>
+                <Text style={styles.uploadModalTitle}>Apply as Artist</Text>
+                <TouchableOpacity onPress={() => setApplyModalVisible(false)}>
+                  <Ionicons name="close" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
 
-                <TextInput style={styles.input} placeholder="First Name" placeholderTextColor="#999" value={appFirstName} onChangeText={setAppFirstName} />
-                <TextInput style={styles.input} placeholder="Middle Initial" placeholderTextColor="#999" value={appMiddleInitial} onChangeText={setAppMiddleInitial} maxLength={1} />
-                <TextInput style={styles.input} placeholder="Last Name" placeholderTextColor="#999" value={appLastName} onChangeText={setAppLastName} />
-                <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor="#999" keyboardType="phone-pad" value={appPhone} onChangeText={setAppPhone} />
-                <TextInput style={styles.input} placeholder="Age" placeholderTextColor="#999" keyboardType="numeric" value={appAge} onChangeText={setAppAge} />
+              <ScrollView style={styles.uploadModalBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
-                <View style={styles.inputContainer}>
-                  <TouchableOpacity style={styles.input} onPress={() => setAppShowSexDropdown(!appShowSexDropdown)} activeOpacity={0.8}>
-                    <Text style={{ color: appSex ? '#000' : '#999' }}>{appSex || 'Select Sex'}</Text>
-                    <Icon name={appShowSexDropdown ? 'angle-up' : 'angle-down'} size={20} color="#555" style={{ position: 'absolute', right: 10, top: 12 }} />
-                  </TouchableOpacity>
-                  {appShowSexDropdown && (
-                    <View style={styles.dropdownList}>
-                      {['Male', 'Female', 'PreferNotToSay'].map(item => (
-                        <TouchableOpacity key={item} style={styles.dropdownItem} onPress={() => { setAppSex(item); setAppShowSexDropdown(false); }}>
-                          <Text style={styles.dropdownItemText}>{item}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                </View>
+                <Text style={styles.uploadInputLabel}>First Name *</Text>
+                <TextInput style={styles.uploadInput} placeholder="First Name" value={appFirstName} onChangeText={setAppFirstName} />
+                
+                <Text style={styles.uploadInputLabel}>Middle Initial</Text>
+                <TextInput style={styles.uploadInput} placeholder="Middle Initial" value={appMiddleInitial} onChangeText={setAppMiddleInitial} maxLength={1} />
+                
+                <Text style={styles.uploadInputLabel}>Last Name *</Text>
+                <TextInput style={styles.uploadInput} placeholder="Last Name" value={appLastName} onChangeText={setAppLastName} />
+                
+                <Text style={styles.uploadInputLabel}>Phone Number *</Text>
+                <TextInput style={styles.uploadInput} placeholder="Phone Number" keyboardType="phone-pad" value={appPhone} onChangeText={setAppPhone} />
+                
+                <Text style={styles.uploadInputLabel}>Age *</Text>
+                <TextInput style={styles.uploadInput} placeholder="Age" keyboardType="numeric" value={appAge} onChangeText={setAppAge} />
 
-                <TouchableOpacity style={styles.input} onPress={() => setAppShowDatePicker(true)}>
-                  <Text style={{ color: appBirthdate ? '#000' : '#888' }}>
-                    {appBirthdate ? `Birthdate: ${appBirthdate.toLocaleDateString('en-US')}` : 'Select your birthdate'}
+                <Text style={styles.uploadInputLabel}>Sex *</Text>
+                <TouchableOpacity style={styles.uploadInput} onPress={() => setAppShowSexDropdown(!appShowSexDropdown)}>
+                  <Text style={{ color: appSex ? '#000' : '#999' }}>{appSex || 'Select Sex'}</Text>
+                  <Ionicons name={appShowSexDropdown ? 'chevron-up' : 'chevron-down'} size={20} color="#555" style={{ position: 'absolute', right: 12, top: 12 }} />
+                </TouchableOpacity>
+                {appShowSexDropdown && (
+                  <View style={styles.categoryDropdown}>
+                    {['Male', 'Female', 'PreferNotToSay'].map(item => (
+                      <TouchableOpacity key={item} style={styles.categoryItem} onPress={() => { setAppSex(item); setAppShowSexDropdown(false); }}>
+                        <Text style={styles.categoryItemText}>{item}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+
+                <Text style={styles.uploadInputLabel}>Birthdate *</Text>
+                <TouchableOpacity style={styles.uploadInput} onPress={() => setAppShowDatePicker(true)}>
+                  <Text style={{ color: appBirthdate ? '#000' : '#999' }}>
+                    {appBirthdate ? appBirthdate.toLocaleDateString('en-US') : 'Select your birthdate'}
                   </Text>
                 </TouchableOpacity>
                 {appShowDatePicker && (
                   <DateTimePicker value={appBirthdate} mode="date" display="default" onChange={onChangeAppDate} />
                 )}
 
-                <TextInput style={styles.input} placeholder="Address" placeholderTextColor="#999" value={appAddress} onChangeText={setAppAddress} />
+                <Text style={styles.uploadInputLabel}>Address *</Text>
+                <TextInput style={styles.uploadInput} placeholder="Address" value={appAddress} onChangeText={setAppAddress} />
 
-                <Text style={{ alignSelf: 'flex-start', marginTop: 10, marginBottom: 4, fontWeight: '600' }}>Valid ID</Text>
-                <TouchableOpacity onPress={pickValidIdImage} style={styles.imagePicker}>
+                <Text style={styles.uploadInputLabel}>Valid ID *</Text>
+                <TouchableOpacity onPress={pickValidIdImage} style={styles.uploadImagePicker}>
                   {appValidIdImage ? (
-                    <Image source={appValidIdImage} style={styles.validIdPreview} />  // Use the new style here
+                    <Image source={appValidIdImage} style={styles.uploadPickedImage} />
                   ) : (
-                    <View style={[styles.validIdPreview, styles.placeholderCircle]}>
-                      <Icon name="id-card" size={36} color="#999" />
+                    <View style={styles.uploadImagePlaceholder}>
+                      <Ionicons name="card-outline" size={48} color="#A68C7B" />
+                      <Text style={styles.uploadImageText}>Tap to upload Valid ID</Text>
                     </View>
                   )}
-                  <Text style={styles.changePhotoText}>Upload Valid ID</Text>
                 </TouchableOpacity>
 
-                <Text style={{ alignSelf: 'flex-start', marginTop: 10, marginBottom: 4, fontWeight: '600' }}>Selfie</Text>
-                <TouchableOpacity onPress={pickSelfieImage} style={styles.imagePicker}>
+                <Text style={styles.uploadInputLabel}>Selfie *</Text>
+                <TouchableOpacity onPress={pickSelfieImage} style={styles.uploadImagePicker}>
                   {appSelfieImage ? (
-                    <Image source={appSelfieImage} style={styles.artworkPreview} />
+                    <Image source={appSelfieImage} style={styles.uploadPickedImage} />
                   ) : (
-                    <View style={[styles.artworkPreview, styles.placeholderCircle]}>
-                      <Icon name="user" size={36} color="#999" />
+                    <View style={styles.uploadImagePlaceholder}>
+                      <Ionicons name="person-outline" size={48} color="#A68C7B" />
+                      <Text style={styles.uploadImageText}>Tap to upload Selfie</Text>
                     </View>
                   )}
-                  <Text style={styles.changePhotoText}>Upload Selfie</Text>
                 </TouchableOpacity>
 
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity style={styles.cancelButton} onPress={() => setApplyModalVisible(false)} disabled={appSubmitting}>
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.saveButton} onPress={submitArtistApplication} disabled={appSubmitting}>
-                    <Text style={styles.saveButtonText}>{appSubmitting ? 'Submitting...' : 'Submit'}</Text>
-                  </TouchableOpacity>
-                </View>
+                <TouchableOpacity
+                  style={[styles.uploadButton, appSubmitting && styles.uploadButtonDisabled]}
+                  onPress={submitArtistApplication}
+                  disabled={appSubmitting}
+                >
+                  <Text style={styles.uploadButtonText}>
+                    {appSubmitting ? 'Submitting...' : 'Submit Application'}
+                  </Text>
+                </TouchableOpacity>
               </ScrollView>
-            </KeyboardAvoidingView>
+            </View>
           </View>
-        </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
         <View style={styles.avatarContainer}>
           {image ? (
@@ -927,14 +955,15 @@ export default function ProfileScreen() {
           )}
         </View>
         <View style={styles.infoContainer}>
-          <Text style={styles.detail}>Gender: {sex || "Not set"}</Text>
-          <Text style={styles.detail}>Birthdate: {formattedDate || "Not set"}</Text>
-          <Text style={styles.detail}>Address: {address}</Text>
-          <Text style={styles.detail}>Bio: {bio}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Name:</Text> {[firstName, middleName, lastName].filter(Boolean).join(' ') || "Not set"}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Gender:</Text> {sex || "Not set"}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Birthdate:</Text> {formattedDate || "Not set"}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Address:</Text> {address}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Bio:</Text> {bio}</Text>
         </View>
 
         <View style={styles.infoContainer}>
-          <Text style={styles.detail}>About: {about}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>About:</Text> {about}</Text>
         </View>
 
 
@@ -1090,240 +1119,173 @@ export default function ProfileScreen() {
         visible={artModalVisible}
         animationType="slide"
         transparent
-        presentationStyle="overFullScreen"
         onRequestClose={() => setArtModalVisible(false)}
       >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={styles.modalOverlay}>
-            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.keyboardView}>
-              <ScrollView contentContainerStyle={styles.modalBox} keyboardShouldPersistTaps="handled">
-                <Text style={styles.modalTitle}>Upload Artwork</Text>
-
-
-                <TouchableOpacity onPress={pickArtworkImage} style={styles.imagePicker}>
-                  {artImage ? (
-                    <Image source={artImage} style={styles.artworkPreview} />
-                  ) : (
-                    <View style={[styles.artworkPreview, styles.placeholderCircle]}>
-                      <Icon name="image" size={40} color="#999" />
-                    </View>
-                  )}
-                  <Text style={styles.changePhotoText}>Choose Artwork Image</Text>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <View style={styles.uploadModalOverlay}>
+            <View style={styles.uploadModalContent}>
+              <View style={styles.uploadModalHeader}>
+                <Text style={styles.uploadModalTitle}>Upload Artwork</Text>
+                <TouchableOpacity onPress={() => setArtModalVisible(false)}>
+                  <Ionicons name="close" size={24} color="#333" />
                 </TouchableOpacity>
+              </View>
 
+              <ScrollView style={styles.uploadModalBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {/* Image Picker */}
+              <TouchableOpacity style={styles.uploadImagePicker} onPress={pickArtworkImage}>
+                {artImage ? (
+                  <Image source={artImage} style={styles.uploadPickedImage} />
+                ) : (
+                  <View style={styles.uploadImagePlaceholder}>
+                    <Ionicons name="image-outline" size={48} color="#A68C7B" />
+                    <Text style={styles.uploadImageText}>Tap to select image</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
 
-                <TextInput
-                  style={styles.input}
-                  placeholder="Title (optional)"
-                  placeholderTextColor="#999"
-                  value={artTitle}
-                  onChangeText={setArtTitle}
-                />
-                <TextInput
-                  style={[styles.input, { height: 80 }]}
-                  placeholder="Description (optional)"
-                  placeholderTextColor="#999"
-                  value={artDescription}
-                  onChangeText={setArtDescription}
-                  multiline
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Medium (e.g., Oil, Digital)"
-                  placeholderTextColor="#999"
-                  value={artMedium}
-                  onChangeText={setArtMedium}
-                />
+              {/* Title Input */}
+              <Text style={styles.uploadInputLabel}>Title *</Text>
+              <TextInput
+                style={styles.uploadInput}
+                placeholder="Enter artwork title"
+                value={artTitle}
+                onChangeText={setArtTitle}
+              />
 
+              {/* Medium Input */}
+              <Text style={styles.uploadInputLabel}>Medium</Text>
+              <TextInput
+                style={styles.uploadInput}
+                placeholder="e.g., Oil, Digital, Watercolor"
+                value={artMedium}
+                onChangeText={setArtMedium}
+              />
 
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity style={styles.cancelButton} onPress={() => setArtModalVisible(false)} disabled={artUploading}>
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.saveButton} onPress={submitArtwork} disabled={artUploading}>
-                    <Text style={styles.saveButtonText}>{artUploading ? "Uploading..." : "Upload"}</Text>
-                  </TouchableOpacity>
-                </View>
-              </ScrollView>
-            </KeyboardAvoidingView>
+              {/* Description Input */}
+              <Text style={styles.uploadInputLabel}>Description</Text>
+              <TextInput
+                style={[styles.uploadInput, styles.uploadTextArea]}
+                placeholder="Enter description"
+                value={artDescription}
+                onChangeText={setArtDescription}
+                multiline
+                numberOfLines={4}
+              />
+
+              {/* Upload Button */}
+              <TouchableOpacity
+                style={[styles.uploadButton, artUploading && styles.uploadButtonDisabled]}
+                onPress={submitArtwork}
+                disabled={artUploading}
+              >
+                <Text style={styles.uploadButtonText}>
+                  {artUploading ? 'Uploading...' : 'Upload Artwork'}
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
-        </TouchableWithoutFeedback>
+        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
 
       {/* Edit Profile Modal */}
-      <Modal visible={modalVisible} animationType="fade" transparent>
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={styles.modalOverlay}>
-            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.keyboardView}>
-              <ScrollView contentContainerStyle={styles.modalBox} keyboardShouldPersistTaps="handled">
-                <Text style={styles.modalTitle}>Edit Profile</Text>
+      <Modal visible={modalVisible} animationType="slide" transparent onRequestClose={() => setModalVisible(false)}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <View style={styles.uploadModalOverlay}>
+            <View style={styles.uploadModalContent}>
+              <View style={styles.uploadModalHeader}>
+                <Text style={styles.uploadModalTitle}>Edit Profile</Text>
+                <TouchableOpacity onPress={() => setModalVisible(false)}>
+                  <Ionicons name="close" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
 
-
-                <TouchableOpacity onPress={pickImage} style={styles.imagePicker}>
+              <ScrollView style={styles.uploadModalBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                <Text style={styles.uploadInputLabel}>Profile Photo</Text>
+                <TouchableOpacity onPress={pickImage} style={styles.uploadImagePicker}>
                   {tempImage ? (
-                    <Image source={tempImage} style={styles.avatarEdit} />
+                    <Image source={tempImage} style={styles.uploadPickedImage} />
                   ) : (
-                    <View style={[styles.avatarEdit, styles.placeholderCircle]}>
-                      <Icon name="user" size={40} color="#999" />
+                    <View style={styles.uploadImagePlaceholder}>
+                      <Ionicons name="person-circle-outline" size={48} color="#A68C7B" />
+                      <Text style={styles.uploadImageText}>Tap to change photo</Text>
                     </View>
                   )}
-                  <Text style={styles.changePhotoText}>Change Photo</Text>
                 </TouchableOpacity>
 
+                <Text style={styles.uploadInputLabel}>Cover Photo</Text>
+                <TouchableOpacity onPress={pickBackgroundImage} style={styles.uploadImagePicker}>
+                  {tempBackgroundImage ? (
+                    <Image source={{ uri: tempBackgroundImage.uri }} style={styles.uploadPickedImage} />
+                  ) : (
+                    <View style={styles.uploadImagePlaceholder}>
+                      <Ionicons name="image-outline" size={48} color="#A68C7B" />
+                      <Text style={styles.uploadImageText}>Tap to change cover</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
 
-                <TouchableOpacity onPress={pickBackgroundImage} style={styles.imagePicker}>
-                  <View style={styles.backgroundPreviewContainer}>
-                    {tempBackgroundImage ? (
-                      <Image
-                        source={{ uri: tempBackgroundImage.uri }}
-                        style={styles.backgroundPreviewImage}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View style={[styles.backgroundPreviewImage, styles.placeholderCircle]}>
-                        <Icon name="image" size={40} color="#999" />
-                      </View>
-                    )}
+                <Text style={styles.uploadInputLabel}>First Name</Text>
+                <TextInput style={styles.uploadInput} placeholder="First Name" value={tempFirstName} onChangeText={setTempFirstName} />
+
+                <Text style={styles.uploadInputLabel}>Middle Name</Text>
+                <TextInput style={styles.uploadInput} placeholder="Middle Name" value={tempMiddleName} onChangeText={setTempMiddleName} />
+
+                <Text style={styles.uploadInputLabel}>Last Name</Text>
+                <TextInput style={styles.uploadInput} placeholder="Last Name" value={tempLastName} onChangeText={setTempLastName} />
+
+                <Text style={styles.uploadInputLabel}>Username</Text>
+                <TextInput style={styles.uploadInput} placeholder="Username" value={tempUserNameField} onChangeText={setTempUserNameField} />
+
+                <Text style={styles.uploadInputLabel}>Sex</Text>
+                <TouchableOpacity style={styles.uploadInput} onPress={() => setShowSexDropdown(!showSexDropdown)}>
+                  <Text style={{ color: tempSex ? "#000" : "#999" }}>{tempSex || "Select Sex"}</Text>
+                  <Ionicons name={showSexDropdown ? "chevron-up" : "chevron-down"} size={20} color="#555" style={{ position: "absolute", right: 12, top: 12 }} />
+                </TouchableOpacity>
+                {showSexDropdown && (
+                  <View style={styles.categoryDropdown}>
+                    {["Male", "Female", "PreferNotToSay"].map((item) => (
+                      <TouchableOpacity key={item} style={styles.categoryItem} onPress={() => { setTempSex(item); setShowSexDropdown(false); }}>
+                        <Text style={styles.categoryItemText}>{item}</Text>
+                      </TouchableOpacity>
+                    ))}
                   </View>
-                  <Text style={styles.changePhotoText}>Change Background Photo</Text>
-                </TouchableOpacity>
-
-
-                <TextInput
-                  style={styles.input}
-                  placeholder="First Name"
-                  placeholderTextColor="#999"
-                  value={tempFirstName}
-                  onChangeText={setTempFirstName}
-                />
-
-
-                <TextInput
-                  style={styles.input}
-                  placeholder="Middle Name"
-                  placeholderTextColor="#999"
-                  value={tempMiddleName}
-                  onChangeText={setTempMiddleName}
-                />
-
-
-                <TextInput
-                  style={styles.input}
-                  placeholder="Last Name"
-                  placeholderTextColor="#999"
-                  value={tempLastName}
-                  onChangeText={setTempLastName}
-                />
-
-
-                <TextInput
-                  style={styles.input}
-                  placeholder="Username"
-                  placeholderTextColor="#999"
-                  value={tempUserNameField}
-                  onChangeText={setTempUserNameField}
-                />
-
-
-                <View style={styles.inputContainer}>
-                  <TouchableOpacity
-                    style={styles.input}
-                    onPress={() => setShowSexDropdown(!showSexDropdown)}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={{ color: tempSex ? "#000" : "#999" }}>
-                      {tempSex || "Select Sex"}
-                    </Text>
-                    <Icon
-                      name={showSexDropdown ? "angle-up" : "angle-down"}
-                      size={20}
-                      color="#555"
-                      style={{ position: "absolute", right: 10, top: 12 }}
-                    />
-                  </TouchableOpacity>
-
-
-                  {showSexDropdown && (
-                    <View style={styles.dropdownList}>
-                      {["Male", "Female", "PreferNotToSay"].map((item) => (
-                        <TouchableOpacity
-                          key={item}
-                          style={styles.dropdownItem}
-                          onPress={() => {
-                            setTempSex(item);
-                            setShowSexDropdown(false);
-                          }}
-                        >
-                          <Text style={styles.dropdownItemText}>{item}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                </View>
-
-
-                <TouchableOpacity style={styles.input} onPress={() => setShowDatePicker(true)}>
-                  <Text style={{ color: tempBirthday ? "#000" : "#888" }}>
-                    {tempBirthday
-                      ? `Birthday: ${formattedTempDate}`
-                      : "Select your birthday"}
-                  </Text>
-                </TouchableOpacity>
-
-
-                {showDatePicker && (
-                  <DateTimePicker
-                    value={tempBirthday}
-                    mode="date"
-                    display="default"
-                    onChange={onChangeTempDate}
-                  />
                 )}
 
+                <Text style={styles.uploadInputLabel}>Birthday</Text>
+                <TouchableOpacity style={styles.uploadInput} onPress={() => setShowDatePicker(true)}>
+                  <Text style={{ color: tempBirthday ? "#000" : "#999" }}>
+                    {tempBirthday ? formattedTempDate : "Select your birthday"}
+                  </Text>
+                </TouchableOpacity>
+                {showDatePicker && (
+                  <DateTimePicker value={tempBirthday} mode="date" display="default" onChange={onChangeTempDate} />
+                )}
 
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter your address"
-                  placeholderTextColor="#999"
-                  value={tempAddress}
-                  onChangeText={setTempAddress}
-                />
+                <Text style={styles.uploadInputLabel}>Address</Text>
+                <TextInput style={styles.uploadInput} placeholder="Enter your address" value={tempAddress} onChangeText={setTempAddress} />
 
+                <Text style={styles.uploadInputLabel}>Bio</Text>
+                <TextInput style={styles.uploadInput} placeholder="Enter your bio" value={tempBio} onChangeText={setTempBio} />
 
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter your bio"
-                  placeholderTextColor="#999"
-                  value={tempBio}
-                  onChangeText={setTempBio}
-                />
+                <Text style={styles.uploadInputLabel}>About</Text>
+                <TextInput style={[styles.uploadInput, styles.uploadTextArea]} placeholder="Write something about yourself" multiline value={tempAbout} onChangeText={setTempAbout} />
 
-
-                <TextInput
-                  style={[styles.input, { height: 80 }]}
-                  placeholder="Write something about yourself"
-                  placeholderTextColor="#999"
-                  multiline
-                  value={tempAbout}
-                  onChangeText={setTempAbout}
-                />
-
-
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-
-
-                  <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-                    <Text style={styles.saveButtonText}>Save</Text>
-                  </TouchableOpacity>
-                </View>
+                <TouchableOpacity style={styles.uploadButton} onPress={handleSave}>
+                  <Text style={styles.uploadButtonText}>Save Changes</Text>
+                </TouchableOpacity>
               </ScrollView>
-            </KeyboardAvoidingView>
+            </View>
           </View>
-        </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
       </ScrollView>
     </SafeAreaView>
@@ -1352,11 +1314,12 @@ const styles = StyleSheet.create({
     borderColor: "#fff",
   },
   name: { fontSize: 20, fontWeight: "bold", marginTop: -30 },
-  detail: { fontSize: 14, color: "#444", textAlign: "center", marginVertical: 2 },
+  detail: { fontSize: 14, color: "#000", textAlign: "center", marginVertical: 2 },
+  detailLabel: { color: "#A68C7B", fontWeight: "600" },
   infoContainer: {
     backgroundColor: "#f9f9f9",
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#D2AE7E",
     borderRadius: 10,
     padding: 12,
     marginVertical: 10,
@@ -1369,13 +1332,13 @@ const styles = StyleSheet.create({
   },
   buttonRow: { flexDirection: "row" },
   button: {
-    backgroundColor: "#eee",
+    backgroundColor: "#A68C7B",
     paddingVertical: 8,
     paddingHorizontal: 20,
     borderRadius: 20,
     marginHorizontal: 5,
   },
-  buttonText: { fontSize: 14, fontWeight: "600" },
+  buttonText: { fontSize: 14, fontWeight: "600", color: "#fff" },
   fullWidthButton: {
     marginTop: 10,
     alignSelf: "stretch",
@@ -1408,12 +1371,12 @@ const styles = StyleSheet.create({
     height: 100,
     borderRadius: 10,
     borderWidth: 2,
-    borderColor: "#ccc",
+    borderColor: "#D2AE7E",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 10,
   },
-  addImageText: { fontSize: 32, color: "#999" },
+  addImageText: { fontSize: 32, color: "#D2AE7E" },
   fullScreenContainer: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.9)",
@@ -1534,5 +1497,116 @@ const styles = StyleSheet.create({
   pendingButton: {
     backgroundColor: '#FFC107',
     opacity: 0.8,
+  },
+  uploadModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  uploadModalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+  },
+  uploadModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  uploadModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#A68C7B',
+  },
+  uploadModalBody: {
+    padding: 20,
+  },
+  uploadImagePicker: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#A68C7B',
+    borderStyle: 'dashed',
+    marginBottom: 20,
+    overflow: 'hidden',
+  },
+  uploadImagePlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f9f9f9',
+  },
+  uploadImageText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: '#A68C7B',
+  },
+  uploadPickedImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  uploadInputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  uploadInput: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    marginBottom: 16,
+    backgroundColor: '#fff',
+  },
+  uploadTextArea: {
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  uploadButton: {
+    backgroundColor: '#A68C7B',
+    paddingVertical: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  uploadButtonDisabled: {
+    opacity: 0.6,
+  },
+  uploadButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  categoryDropdown: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    marginTop: -8,
+    marginBottom: 16,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  categoryItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  categoryItemText: {
+    fontSize: 14,
+    color: '#333',
   },
 });
