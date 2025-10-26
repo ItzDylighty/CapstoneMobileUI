@@ -1,20 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import {
-  SafeAreaView,
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TextInput,
-  Image,
-  TouchableOpacity,
-  Keyboard,
-  Animated,
-  Platform,
-  BackHandler,
-  KeyboardAvoidingView,
-  RefreshControl,
-} from 'react-native';
+import { SafeAreaView, View, Text, StyleSheet, FlatList, TextInput, Image, TouchableOpacity, Keyboard, Animated, Platform, BackHandler, KeyboardAvoidingView, RefreshControl, } from 'react-native';
 import { useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -40,6 +25,7 @@ const ViewMessageScreen = () => {
   const [partnerAvatar, setPartnerAvatar] = useState(null);
   const [accessToken, setAccessToken] = useState(null);
   const [refreshToken, setRefreshToken] = useState(null);
+  const [hasMarkedRead, setHasMarkedRead] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const insets = useSafeAreaInsets();
   const keyboardHeight = useRef(new Animated.Value(0)).current;
@@ -185,15 +171,27 @@ const ViewMessageScreen = () => {
     }
   };
 
-  const markRead = async (at, rt) => {
+  const markRead = async (at, rt, force = false) => {
     // Skip for new conversations
     if (!conversationId || conversationId === 'new') return;
+    // Prevent duplicate mark read calls unless forced
+    if (hasMarkedRead && !force) {
+      return;
+    }
     try {
-      await fetch(`${API_BASE}/message/markRead/${encodeURIComponent(conversationId)}`, {
+      const res = await fetch(`${API_BASE}/message/markRead/${encodeURIComponent(conversationId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Cookie': `access_token=${at || ''}; refresh_token=${rt || ''}` },
       });
-    } catch {}
+      if (res.ok) {
+        setHasMarkedRead(true);
+        return true;
+      } else {
+        return false;
+      }
+    } catch (e) {
+      return false;
+    }
   };
 
   const refreshAll = async () => {
@@ -204,8 +202,8 @@ const ViewMessageScreen = () => {
         fetchConversationMeta(at, rt),
         fetchMessages(at, rt, uid),
       ]);
-      // Fire-and-forget mark as read to avoid blocking UI
-      markRead(at, rt);
+      // Mark as read immediately after loading messages
+      await markRead(at, rt, true);
     } finally {
       setLoading(false);
     }
@@ -230,6 +228,8 @@ const ViewMessageScreen = () => {
   useEffect(() => {
     // Clear previous conversation immediately to avoid showing old messages
     setMessages([]);
+    setHasMarkedRead(false); // Reset mark read flag for new conversation
+    
     // For new conversations, set partnerId from URL params
     if (conversationId === 'new' && initialUserId) {
       setPartnerId(initialUserId);
@@ -239,8 +239,28 @@ const ViewMessageScreen = () => {
     setPartnerName(initialName || '');
     setPartnerAvatar(null);
     refreshAll();
+    
+    // Cleanup: Mark as read when leaving the conversation
+    return () => {
+      if (conversationId && conversationId !== 'new') {
+        loadSession().then(({ at, rt }) => {
+          if (at && rt) markRead(at, rt, true);
+        }).catch(() => {});
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, initialUserId]);
+
+  // Mark as read when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (conversationId && conversationId !== 'new') {
+        loadSession().then(({ at, rt }) => {
+          if (at && rt) markRead(at, rt, true);
+        }).catch(() => {});
+      }
+    }, [conversationId])
+  );
 
   // Realtime via Socket.IO: join user room and listen for new messages
   useEffect(() => {
@@ -384,6 +404,19 @@ const ViewMessageScreen = () => {
       
       {/* Profile Header Container */}
       <View style={styles.profileHeader}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={async () => {
+            // Ensure messages are marked as read before going back
+            if (conversationId && conversationId !== 'new' && !hasMarkedRead) {
+              const { at, rt } = await loadSession();
+              await markRead(at, rt, true);
+            }
+            router.push('/(drawer)/messages');
+          }}
+        >
+          <Ionicons name="arrow-back" size={24} color="#333" />
+        </TouchableOpacity>
         {partnerAvatar ? (
           <Image source={{ uri: partnerAvatar }} style={styles.profileHeaderAvatar} />
         ) : (
@@ -530,6 +563,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+  },
+  backButton: {
+    padding: 8,
+    marginRight: 8,
+    borderRadius: 20,
   },
   profileHeaderAvatar: {
     width: 40,
