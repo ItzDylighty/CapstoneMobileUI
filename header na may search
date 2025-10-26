@@ -330,11 +330,23 @@ const Header = ({ title, showSearch, onSearch }) => {
                   ) : (
                     notifications.map((n, idx) => (
                       <View key={n.id}>
-                        <TouchableOpacity onPress={() => openNotification(n)}>
-                          <Text style={[styles.notifItem, !n.read ? styles.notifItemUnread : null]}>
-                            <Text style={styles.bold}>{n.title}</Text>{"\n"}
-                            {n.message}
-                            {n.createdAt ? `\n${timeAgo(n.createdAt)}` : ''}
+                        <TouchableOpacity 
+                          style={[styles.notifCard, !n.read && styles.notifCardUnread]}
+                          onPress={() => openNotification(n)}
+                        >
+                          <View style={styles.notifAvatar}>
+                            <Ionicons name="notifications" size={20} color="#A68C7B" />
+                          </View>
+                          <View style={styles.notifContent}>
+                            <Text style={[styles.notifTitle, !n.read && styles.notifTitleUnread]}>
+                              {n.title}
+                            </Text>
+                            <Text style={styles.notifMessage} numberOfLines={2}>
+                              {n.message}
+                            </Text>
+                          </View>
+                          <Text style={styles.notifTime}>
+                            {n.createdAt ? timeAgo(n.createdAt) : ''}
                           </Text>
                         </TouchableOpacity>
                         {idx < notifications.length - 1 && <View style={styles.notifSeparator} />}
@@ -436,9 +448,9 @@ const styles = StyleSheet.create({
   notifDropdown: {
     position: "absolute",
     top: 35,
-    right: 0,
-    width: 250,
-    maxHeight: 200,
+    right: -20,
+    width: 320,
+    maxHeight: 400,
     backgroundColor: "#fff",
     borderRadius: 10,
     padding: 10,
@@ -474,6 +486,47 @@ const styles = StyleSheet.create({
   },
   notifItemUnread: {
     fontWeight: '600',
+  },
+  notifCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 12,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+  },
+  notifCardUnread: {
+    backgroundColor: '#F5F3F0',
+  },
+  notifAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F9F9F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  notifContent: {
+    flex: 1,
+    marginRight: 8,
+  },
+  notifTitle: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 4,
+  },
+  notifTitleUnread: {
+    fontWeight: '700',
+  },
+  notifMessage: {
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 16,
+  },
+  notifTime: {
+    fontSize: 11,
+    color: '#999',
+    marginTop: 2,
   },
   notifSeparator: {
     height: StyleSheet.hairlineWidth,
