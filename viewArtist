@@ -108,8 +108,17 @@ export default function ProfileScreen() {
       console.log('[viewArtist] fetchViewedGallery data:', data);
       const list = Array.isArray(data) ? data : (data?.arts || data || []);
       const items = list.map((a) => {
-        const u = a?.image;
-        const abs = u ? (u.startsWith('http') ? u : `${API_ORIGIN}${u}`) : null;
+        // Image is stored as JSONB array, extract first URL
+        let imageUrl = null;
+        if (Array.isArray(a?.image) && a.image.length > 0) {
+          imageUrl = a.image[0];
+        } else if (typeof a?.image === 'string') {
+          imageUrl = a.image;
+        }
+        
+        // Make URL absolute if needed
+        const abs = imageUrl ? (imageUrl.startsWith('http') ? imageUrl : `${API_ORIGIN}${imageUrl}`) : null;
+        
         return {
           id: a?.artId || a?.id || null,
           image: abs,
@@ -450,8 +459,17 @@ export default function ProfileScreen() {
       console.log('[viewArtist] fetchGallery data:', data);
       const list = Array.isArray(data) ? data : (data?.arts || data || []);
       const items = list.map((a) => {
-        const u = a?.image;
-        const abs = u ? (u.startsWith("http") ? u : `${API_ORIGIN}${u}`) : null;
+        // Image is stored as JSONB array, extract first URL
+        let imageUrl = null;
+        if (Array.isArray(a?.image) && a.image.length > 0) {
+          imageUrl = a.image[0];
+        } else if (typeof a?.image === 'string') {
+          imageUrl = a.image;
+        }
+        
+        // Make URL absolute if needed
+        const abs = imageUrl ? (imageUrl.startsWith("http") ? imageUrl : `${API_ORIGIN}${imageUrl}`) : null;
+        
         return {
           id: a?.artId || a?.id || null,
           image: abs,
@@ -551,14 +569,15 @@ export default function ProfileScreen() {
           <Ionicons name="checkmark-circle" size={20} color="#1DA1F2" style={{ marginLeft: 6 }} />
         </View>
         <View style={styles.infoContainer}>
-          <Text style={styles.detail}>Gender: {sex || "Not set"}</Text>
-          <Text style={styles.detail}>Birthdate: {formattedDate || "Not set"}</Text>
-          <Text style={styles.detail}>Address: {address}</Text>
-          <Text style={styles.detail}>Bio: {bio}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Name:</Text> {[firstName, middleName, lastName].filter(Boolean).join(' ') || "Not set"}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Gender:</Text> {sex || "Not set"}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Birthdate:</Text> {formattedDate || "Not set"}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Address:</Text> {address}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Bio:</Text> {bio}</Text>
         </View>
 
         <View style={styles.infoContainer}>
-          <Text style={styles.detail}>About: {about}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>About:</Text> {about}</Text>
         </View>
       </View>
 
@@ -692,22 +711,22 @@ const styles = StyleSheet.create({
   avatarContainer: { position: "relative", top: -50, alignItems: "center" },
   avatar: { width: 100, height: 100, borderRadius: 50, borderWidth: 3, borderColor: "#fff" },
   name: { fontSize: 20, fontWeight: "bold", marginTop: -30 },
-  detail: { fontSize: 14, color: "#444", textAlign: "center", marginVertical: 2 },
+  detail: { fontSize: 14, color: "#000", textAlign: "center", marginVertical: 2 },
+  detailLabel: { color: "#A68C7B", fontWeight: "600" },
   infoContainer: {
     backgroundColor: "#f9f9f9",
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#D2AE7E",
     borderRadius: 10,
     padding: 12,
     marginVertical: 10,
-    marginHorizontal: 20,
+    marginHorizontal: 10,
     width: "90%",
   },
   sectionTitle: { fontSize: 18, fontWeight: "bold", marginHorizontal: 15, marginTop: 25, marginBottom: 10 },
   galleryRow: { flexDirection: "row", paddingHorizontal: 10 },
   galleryItem: { width: 100, height: 100, borderRadius: 10, marginRight: 10 },
   artworkPreview: { width: 120, height: 120, borderRadius: 12, backgroundColor: '#f0f0f0' },
-  addImageBox: { width: 100, height: 100, borderRadius: 10, borderWidth: 2, borderColor: "#ccc", alignItems: "center", justifyContent: "center", marginRight: 10 },
   addImageText: { fontSize: 32, color: "#999" },
   fullScreenContainer: { flex: 1, backgroundColor: "rgba(0,0,0,0.9)", justifyContent: "center", alignItems: "center" },
   artModalImage: { width: '100%', height: 260, resizeMode: 'cover', borderWidth: 3, borderColor: '#fff', borderRadius: 10 },
