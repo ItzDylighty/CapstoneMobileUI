@@ -5,7 +5,6 @@ import { supabase } from "../../supabase/supabaseClient";
 import { useRouter } from 'expo-router';
 import Header from '../components/Header'; // Reusable Header
 
-// Match home.js approach
 const API_BASE = "http://192.168.254.114:3000/api";
 
 // Reusable component for each event card
@@ -42,6 +41,7 @@ const EventsScreen = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState('all');
 
   // Fetch events from backend
   const fetchEvents = async () => {
@@ -80,7 +80,70 @@ const EventsScreen = () => {
     fetchEvents();
   }, []);
 
-  // Sort events based on upload time - newest first (top), oldest last (bottom)
+  // Filter options
+  const filterOptions = [
+    { id: 'all', name: 'All' },
+    { id: 'thisWeek', name: 'This Week' },
+    { id: 'nextWeek', name: 'Next Week' },
+    { id: 'nextMonth', name: 'Next Month' },
+    { id: 'ended', name: 'Done' },
+  ];
+
+  // Helper function to get date ranges
+  const getDateRanges = () => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    // This week (current week)
+    const currentDay = today.getDay();
+    const thisWeekStart = new Date(today);
+    thisWeekStart.setDate(today.getDate() - currentDay);
+    const thisWeekEnd = new Date(thisWeekStart);
+    thisWeekEnd.setDate(thisWeekStart.getDate() + 7);
+    
+    // Next week
+    const nextWeekStart = new Date(thisWeekEnd);
+    const nextWeekEnd = new Date(nextWeekStart);
+    nextWeekEnd.setDate(nextWeekStart.getDate() + 7);
+    
+    // Next month
+    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const nextMonthEnd = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+    
+    return {
+      now,
+      thisWeek: { start: thisWeekStart, end: thisWeekEnd },
+      nextWeek: { start: nextWeekStart, end: nextWeekEnd },
+      nextMonth: { start: nextMonthStart, end: nextMonthEnd },
+    };
+  };
+
+  // Filter events by selected time filter
+  const filterEventsByTime = (eventsList) => {
+    if (selectedFilter === 'all') return eventsList;
+    
+    const ranges = getDateRanges();
+    
+    return eventsList.filter(event => {
+      const startDate = new Date(event.startsAt || event.start || event.createdAt);
+      const endDate = new Date(event.endsAt || event.end || event.startsAt);
+      
+      switch (selectedFilter) {
+        case 'thisWeek':
+          return startDate >= ranges.thisWeek.start && startDate < ranges.thisWeek.end;
+        case 'nextWeek':
+          return startDate >= ranges.nextWeek.start && startDate < ranges.nextWeek.end;
+        case 'nextMonth':
+          return startDate >= ranges.nextMonth.start && startDate <= ranges.nextMonth.end;
+        case 'ended':
+          return endDate < ranges.now;
+        default:
+          return true;
+      }
+    });
+  };
+
+  // Sort events based on upload time - newest first, oldest last
   const sortedEvents = [...events].sort((a, b) => {
     // Try multiple date field variations from backend
     const getEventDate = (event) => {
@@ -93,18 +156,21 @@ const EventsScreen = () => {
     const dateA = getEventDate(a);
     const dateB = getEventDate(b);
     
-    // If dates are equal or both invalid, use eventId as tiebreaker (higher ID = newer)
+    // If dates are equal or both invalid, use eventId as tiebreaker
     if (dateA === dateB) {
       const idA = parseInt(a.eventId || a.id || 0);
       const idB = parseInt(b.eventId || b.id || 0);
       return idB - idA;
     }
     
-    return dateB - dateA; // Newest first (descending)
+    return dateB - dateA; // Newest first
   });
 
+  // Apply time filter first, then search filter
+  const timeFilteredEvents = filterEventsByTime(sortedEvents);
+  
   // Filter events based on search query
-  const filteredEvents = sortedEvents.filter(event => {
+  const filteredEvents = timeFilteredEvents.filter(event => {
     if (!searchQuery.trim()) return true;
     const query = searchQuery.toLowerCase();
     const title = (event.title || '').toLowerCase();
@@ -113,6 +179,13 @@ const EventsScreen = () => {
     const location = (event.location || '').toLowerCase();
     return title.includes(query) || description.includes(query) || venue.includes(query) || location.includes(query);
   });
+
+  // Get count for each filter
+  const getFilterCount = (filterId) => {
+    if (filterId === 'all') return events.length;
+    const tempFilter = selectedFilter;
+    return filterEventsByTime(events).length;
+  };
 
   const handleSearch = (text) => {
     setSearchQuery(text);
@@ -139,6 +212,30 @@ const EventsScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <Header title="Events" showSearch={true} onSearch={handleSearch} />
+
+      {/* Filter Section */}
+      <View style={styles.filterSection}>
+        <Text style={styles.sectionTitle}>Filter Events</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
+          {filterOptions.map((filter) => (
+            <TouchableOpacity
+              key={filter.id}
+              style={[
+                styles.filterChip,
+                selectedFilter === filter.id && styles.filterChipActive
+              ]}
+              onPress={() => setSelectedFilter(filter.id)}
+            >
+              <Text style={[
+                styles.filterChipText,
+                selectedFilter === filter.id && styles.filterChipTextActive
+              ]}>
+                {filter.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       {loading ? (
         <View style={styles.centered}>
@@ -178,7 +275,10 @@ const EventsScreen = () => {
                 <Ionicons name="calendar-outline" size={64} color="#ccc" />
                 <Text style={styles.noResultsTitle}>No events available</Text>
                 <Text style={styles.noResultsText}>
-                  Check back later for upcoming events
+                  {selectedFilter === 'all' 
+                    ? 'Check back later for upcoming events'
+                    : `No events found for "${filterOptions.find(f => f.id === selectedFilter)?.name}"`
+                  }
                 </Text>
               </View>
             )}
@@ -191,6 +291,47 @@ const EventsScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
+  filterSection: {
+    paddingBottom: 10,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginHorizontal: 15,
+    marginTop: 10,
+    marginBottom: 8,
+    color: '#A68C7B',
+  },
+  filterScroll: {
+    marginHorizontal: 15,
+    paddingBottom: 5,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 20,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  filterChipActive: {
+    backgroundColor: '#A68C7B',
+    borderColor: '#A68C7B',
+  },
+  filterChipText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  filterChipTextActive: {
+    color: '#fff',
+    fontWeight: '600',
+  },
   eventGrid: { padding: 10 },
   row: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   eventCard: {
@@ -265,4 +406,3 @@ const styles = StyleSheet.create({
 });
 
 export default EventsScreen;
-
