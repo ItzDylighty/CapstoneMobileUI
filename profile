@@ -926,11 +926,16 @@ export default function ProfileScreen() {
             <Ionicons name="checkmark-circle" size={20} color="#1DA1F2" style={{ marginLeft: 6 }} />
           )}
         </View>
-        <Text style={styles.detail}>Sex: {sex || "Not set"}</Text>
-        <Text style={styles.detail}>Birthdate: {formattedDate || "Not set"}</Text>
-        <Text style={styles.detail}>Address: {address}</Text>
-        <Text style={styles.detail}>Bio: {bio}</Text>
-        <Text style={styles.detail}>About: {about}</Text>
+        <View style={styles.infoContainer}>
+          <Text style={styles.detail}>Gender: {sex || "Not set"}</Text>
+          <Text style={styles.detail}>Birthdate: {formattedDate || "Not set"}</Text>
+          <Text style={styles.detail}>Address: {address}</Text>
+          <Text style={styles.detail}>Bio: {bio}</Text>
+        </View>
+
+        <View style={styles.infoContainer}>
+          <Text style={styles.detail}>About: {about}</Text>
+        </View>
 
 
         <View style={styles.buttonContainer}>
@@ -987,7 +992,7 @@ export default function ProfileScreen() {
       {/* Artwork Galleries - visible only to artist/admin */}
       {(String(role || '').toLowerCase() === 'artist' || String(role || '').toLowerCase() === 'admin') && (
         <>
-          <Text style={styles.sectionTitle}>Artwork Galleries</Text>
+          <Text style={styles.sectionTitle}>My Artwork</Text>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -1348,6 +1353,16 @@ const styles = StyleSheet.create({
   },
   name: { fontSize: 20, fontWeight: "bold", marginTop: -30 },
   detail: { fontSize: 14, color: "#444", textAlign: "center", marginVertical: 2 },
+  infoContainer: {
+    backgroundColor: "#f9f9f9",
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 10,
+    padding: 12,
+    marginVertical: 10,
+    marginHorizontal: 20,
+    width: "90%",
+  },
   buttonContainer: { 
     alignItems: "center", 
     marginTop: 10 
