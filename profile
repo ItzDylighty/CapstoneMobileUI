@@ -645,8 +645,17 @@ export default function ProfileScreen() {
       const data = await res.json();
       const list = Array.isArray(data) ? data : (data?.arts || data || []);
       const items = list.map((a) => {
-        const u = a?.image;
-        const abs = u ? (u.startsWith("http") ? u : `${API_ORIGIN}${u}`) : null;
+        // Image is stored as JSONB array, extract first URL
+        let imageUrl = null;
+        if (Array.isArray(a?.image) && a.image.length > 0) {
+          imageUrl = a.image[0];
+        } else if (typeof a?.image === 'string') {
+          imageUrl = a.image;
+        }
+        
+        // Make URL absolute if needed
+        const abs = imageUrl ? (imageUrl.startsWith("http") ? imageUrl : `${API_ORIGIN}${imageUrl}`) : null;
+        
         return {
           id: a?.artId || a?.id || null,
           image: abs,
@@ -780,7 +789,14 @@ export default function ProfileScreen() {
       });
 
 
-      if (!res.ok) throw new Error("Failed to update profile");
+      if (!res.ok) {
+        let errorMsg = "Failed to update profile";
+        try {
+          const errorData = await res.json();
+          errorMsg = errorData?.message || errorData?.error || errorMsg;
+        } catch {}
+        throw new Error(errorMsg);
+      }
 
 
       setModalVisible(false);
@@ -789,10 +805,10 @@ export default function ProfileScreen() {
       await fetchProfile();
 
 
-      alert("Profile updated!");
+      Alert.alert("Success", "Profile updated successfully!");
     } catch (err) {
-      alert("Failed to save profile information");
-      console.error(err);
+      console.error("Profile update error:", err);
+      Alert.alert("Update Failed", err?.message || "Failed to save profile information");
     }
   };
 
