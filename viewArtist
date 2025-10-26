@@ -546,18 +546,26 @@ export default function ProfileScreen() {
             </View>
           )}
         </View>
-        <Text style={styles.name}>{username || "Username"}</Text>
-        <Text style={styles.detail}>Sex: {sex || "Not set"}</Text>
-        <Text style={styles.detail}>Birthdate: {formattedDate || "Not set"}</Text>
-        <Text style={styles.detail}>Address: {address}</Text>
-        <Text style={styles.detail}>Bio: {bio}</Text>
-        <Text style={styles.detail}>About: {about}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: -30 }}>
+          <Text style={[styles.name, { marginTop: 0 }]}>{username || "Username"}</Text>
+          <Ionicons name="checkmark-circle" size={20} color="#1DA1F2" style={{ marginLeft: 6 }} />
+        </View>
+        <View style={styles.infoContainer}>
+          <Text style={styles.detail}>Gender: {sex || "Not set"}</Text>
+          <Text style={styles.detail}>Birthdate: {formattedDate || "Not set"}</Text>
+          <Text style={styles.detail}>Address: {address}</Text>
+          <Text style={styles.detail}>Bio: {bio}</Text>
+        </View>
+
+        <View style={styles.infoContainer}>
+          <Text style={styles.detail}>About: {about}</Text>
+        </View>
       </View>
 
       {/* Artwork Galleries - horizontal, view-only (no add button) - only show if artworks exist */}
       {galleryImages.length > 0 && (
         <>
-          <Text style={styles.sectionTitle}>Artwork Galleries</Text>
+          <Text style={styles.sectionTitle}>Artist's Portfolio</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.galleryRow}>
             {galleryImages.map((art, index) => (
               <TouchableOpacity key={index} onPress={() => setSelectedArt(art)}>
@@ -685,6 +693,16 @@ const styles = StyleSheet.create({
   avatar: { width: 100, height: 100, borderRadius: 50, borderWidth: 3, borderColor: "#fff" },
   name: { fontSize: 20, fontWeight: "bold", marginTop: -30 },
   detail: { fontSize: 14, color: "#444", textAlign: "center", marginVertical: 2 },
+  infoContainer: {
+    backgroundColor: "#f9f9f9",
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 10,
+    padding: 12,
+    marginVertical: 10,
+    marginHorizontal: 20,
+    width: "90%",
+  },
   sectionTitle: { fontSize: 18, fontWeight: "bold", marginHorizontal: 15, marginTop: 25, marginBottom: 10 },
   galleryRow: { flexDirection: "row", paddingHorizontal: 10 },
   galleryItem: { width: 100, height: 100, borderRadius: 10, marginRight: 10 },
