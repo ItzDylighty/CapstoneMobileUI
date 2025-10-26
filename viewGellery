@@ -222,7 +222,7 @@ const ViewGalleryScreen = () => {
         headers: { 'Content-Type': 'application/json', Cookie: `access_token=${at}; refresh_token=${rt}` },
         body: JSON.stringify({ 
           galleryArtId: artwork.id,
-          text: newComment.trim()
+          content: newComment.trim()
         }),
       });
       const data = await res.json();
@@ -593,15 +593,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 6,
+    alignItems: 'flex-start',
   },
   commentName: {
     fontSize: 14,
     fontWeight: '600',
     color: '#000',
+    flex: 1,
+    marginRight: 8,
   },
   commentDate: {
     fontSize: 12,
     color: '#999',
+    flexShrink: 0,
   },
   commentText: {
     fontSize: 14,
@@ -649,3 +653,4 @@ const styles = StyleSheet.create({
 });
 
 export default ViewGalleryScreen;
+
