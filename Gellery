@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, ScrollView, ActivityIndicator, FlatList, RefreshControl } from 'react-native';
+import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, ScrollView, ActivityIndicator, FlatList, RefreshControl, Modal, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { useNavigation, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from "../../supabase/supabaseClient";
 import Header from '../components/Header';
+import * as ImagePicker from 'expo-image-picker';
 
 const API_BASE = "http://192.168.254.114:3000/api";
 const API_ORIGIN = API_BASE.replace(/\/api$/, "");
@@ -18,6 +19,17 @@ const GalleryScreen = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [totalArtworks, setTotalArtworks] = useState(0);
+  const [role, setRole] = useState(null);
+  const [uploadModalVisible, setUploadModalVisible] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [newArtwork, setNewArtwork] = useState({
+    title: '',
+    medium: '',
+    description: '',
+    category: '',
+    image: null,
+  });
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
   const loadSession = async () => {
     const { data } = await supabase.auth.getSession();
@@ -83,9 +95,27 @@ const GalleryScreen = () => {
     }
   };
 
+  const fetchUserRole = async () => {
+    try {
+      const { at, rt } = await loadSession();
+      if (!at || !rt) return;
+      const res = await fetch(`${API_BASE}/users/role`, {
+        method: 'GET',
+        headers: { Cookie: `access_token=${at}; refresh_token=${rt}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRole(data.role || data);
+      }
+    } catch (error) {
+      console.error('Error fetching user role:', error);
+    }
+  };
+
   useEffect(() => {
     fetchCategories();
     fetchArtworks();
+    fetchUserRole();
   }, []);
 
   const handleCategoryChange = (categoryField, categoryName) => {
@@ -118,12 +148,83 @@ const GalleryScreen = () => {
     return imageUrl.startsWith('http') ? imageUrl : `${API_ORIGIN}${imageUrl}`;
   };
 
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      setNewArtwork({ ...newArtwork, image: result.assets[0] });
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!newArtwork.title.trim()) {
+      Alert.alert('Error', 'Please enter a title');
+      return;
+    }
+    if (!newArtwork.image) {
+      Alert.alert('Error', 'Please select an image');
+      return;
+    }
+
+    try {
+      setUploading(true);
+      const { at, rt } = await loadSession();
+      
+      // Create FormData for image upload
+      const formData = new FormData();
+      formData.append('title', newArtwork.title);
+      formData.append('medium', newArtwork.medium);
+      formData.append('description', newArtwork.description);
+      formData.append('category', newArtwork.category || 'Uncategorized');
+      
+      // Add image file
+      const imageUri = newArtwork.image.uri;
+      const filename = imageUri.split('/').pop();
+      const match = /\.([\w]+)$/.exec(filename);
+      const type = match ? `image/${match[1]}` : 'image/jpeg';
+      
+      formData.append('image', {
+        uri: imageUri,
+        name: filename,
+        type,
+      });
+
+      const res = await fetch(`${API_BASE}/gallery/upload`, {
+        method: 'POST',
+        headers: {
+          Cookie: `access_token=${at}; refresh_token=${rt}`,
+        },
+        body: formData,
+      });
+
+      if (res.ok) {
+        Alert.alert('Success', 'Artwork uploaded successfully!');
+        setUploadModalVisible(false);
+        setNewArtwork({ title: '', medium: '', description: '', category: '', image: null });
+        await fetchArtworks(selectedCategory === 'all' ? 'all' : categories.find(c => c.field === selectedCategory)?.name);
+        await fetchCategories();
+      } else {
+        const error = await res.json();
+        Alert.alert('Error', error.message || 'Failed to upload artwork');
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+      Alert.alert('Error', 'Failed to upload artwork');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const renderArtworkCard = (item) => (
     <TouchableOpacity 
       style={styles.card} 
       key={item.id}
       onPress={() => {
-        console.log('Navigating to artwork:', item.id, 'Full item:', item);
         router.push(`/viewGallery?artworkId=${item.id}`);
       }}
     >
@@ -233,6 +334,131 @@ const GalleryScreen = () => {
           </>
         )}
       </ScrollView>
+
+      {/* Floating Add Button - Only for Artists */}
+      {role === 'artist' && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => setUploadModalVisible(true)}
+        >
+          <Ionicons name="add" size={28} color="#fff" />
+        </TouchableOpacity>
+      )}
+
+      {/* Upload Modal */}
+      <Modal
+        visible={uploadModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setUploadModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Upload Artwork</Text>
+                <TouchableOpacity onPress={() => setUploadModalVisible(false)}>
+                  <Ionicons name="close" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {/* Image Picker */}
+              <TouchableOpacity style={styles.imagePicker} onPress={pickImage}>
+                {newArtwork.image ? (
+                  <Image source={{ uri: newArtwork.image.uri }} style={styles.pickedImage} />
+                ) : (
+                  <View style={styles.imagePickerPlaceholder}>
+                    <Ionicons name="image-outline" size={48} color="#A68C7B" />
+                    <Text style={styles.imagePickerText}>Tap to select image</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              {/* Title Input */}
+              <Text style={styles.inputLabel}>Title *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter artwork title"
+                value={newArtwork.title}
+                onChangeText={(text) => setNewArtwork({ ...newArtwork, title: text })}
+              />
+
+              {/* Medium Input */}
+              <Text style={styles.inputLabel}>Medium</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., Oil, Digital, Watercolor"
+                value={newArtwork.medium}
+                onChangeText={(text) => setNewArtwork({ ...newArtwork, medium: text })}
+              />
+
+              {/* Description Input */}
+              <Text style={styles.inputLabel}>Description</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Enter description"
+                value={newArtwork.description}
+                onChangeText={(text) => setNewArtwork({ ...newArtwork, description: text })}
+                multiline
+                numberOfLines={4}
+              />
+
+              {/* Category Selector */}
+              <Text style={styles.inputLabel}>Category</Text>
+              <TouchableOpacity
+                style={styles.input}
+                onPress={() => setShowCategoryDropdown(!showCategoryDropdown)}
+              >
+                <Text style={{ color: newArtwork.category ? '#000' : '#999' }}>
+                  {newArtwork.category || 'Select category'}
+                </Text>
+                <Ionicons
+                  name={showCategoryDropdown ? 'chevron-up' : 'chevron-down'}
+                  size={20}
+                  color="#555"
+                  style={{ position: 'absolute', right: 12, top: 12 }}
+                />
+              </TouchableOpacity>
+              {showCategoryDropdown && (
+                <View style={styles.categoryDropdown}>
+                  <ScrollView style={{ maxHeight: 200 }}>
+                    {categories
+                      .filter(cat => cat.field !== 'all')
+                      .map((cat) => (
+                        <TouchableOpacity
+                          key={cat.field}
+                          style={styles.categoryItem}
+                          onPress={() => {
+                            setNewArtwork({ ...newArtwork, category: cat.name });
+                            setShowCategoryDropdown(false);
+                          }}
+                        >
+                          <Text style={styles.categoryItemText}>{cat.name}</Text>
+                        </TouchableOpacity>
+                      ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* Upload Button */}
+              <TouchableOpacity
+                style={[styles.uploadButton, uploading && styles.uploadButtonDisabled]}
+                onPress={handleUpload}
+                disabled={uploading}
+              >
+                <Text style={styles.uploadButtonText}>
+                  {uploading ? 'Uploading...' : 'Upload Artwork'}
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -376,6 +602,134 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
   },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#A68C7B',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#A68C7B',
+  },
+  modalBody: {
+    padding: 20,
+  },
+  imagePicker: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#A68C7B',
+    borderStyle: 'dashed',
+    marginBottom: 20,
+    overflow: 'hidden',
+  },
+  imagePickerPlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f9f9f9',
+  },
+  imagePickerText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: '#A68C7B',
+  },
+  pickedImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    marginBottom: 16,
+    backgroundColor: '#fff',
+  },
+  textArea: {
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  uploadButton: {
+    backgroundColor: '#A68C7B',
+    paddingVertical: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  uploadButtonDisabled: {
+    opacity: 0.6,
+  },
+  uploadButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  categoryDropdown: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    marginTop: -8,
+    marginBottom: 16,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  categoryItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  categoryItemText: {
+    fontSize: 14,
+    color: '#333',
+  },
 });
 
 export default GalleryScreen;
+
