@@ -46,6 +46,7 @@ export default function ProfileScreen() {
   const [refreshToken, setRefreshToken] = useState(null);
   const [galleryImages, setGalleryImages] = useState([]);
   const [role, setRole] = useState(null);
+  
   // Artwork upload modal state
   const [artModalVisible, setArtModalVisible] = useState(false);
   const [artImage, setArtImage] = useState(null); // { uri }
@@ -53,7 +54,7 @@ export default function ProfileScreen() {
   const [artDescription, setArtDescription] = useState("");
   const [artMedium, setArtMedium] = useState("");
   const [artUploading, setArtUploading] = useState(false);
-  // Artwork interactions (likes/comments)
+  // Artwork interactions
   const [artComments, setArtComments] = useState([]);
   const [artLikesCount, setArtLikesCount] = useState(0);
   const [artUserLiked, setArtUserLiked] = useState(false);
@@ -394,7 +395,6 @@ export default function ProfileScreen() {
       fd.append('sex', String(appSex));
       fd.append('birthdate', new Date(appBirthdate).toISOString());
       fd.append('address', String(appAddress));
-      // Optional fields to match web (empty if not used in RN UI)
       fd.append('portfolio', '');
       fd.append('bio', '');
       // Consent required by web flow; RN UI has no toggle, so set true to match web behavior
@@ -970,19 +970,8 @@ export default function ProfileScreen() {
             <Ionicons name="checkmark-circle" size={20} color="#1DA1F2" style={{ marginLeft: 6 }} />
           )}
         </View>
-        <View style={styles.infoContainer}>
-          <Text style={styles.detail}><Text style={styles.detailLabel}>Name:</Text> {[firstName, middleName, lastName].filter(Boolean).join(' ') || "Not set"}</Text>
-          <Text style={styles.detail}><Text style={styles.detailLabel}>Gender:</Text> {sex || "Not set"}</Text>
-          <Text style={styles.detail}><Text style={styles.detailLabel}>Birthdate:</Text> {formattedDate || "Not set"}</Text>
-          <Text style={styles.detail}><Text style={styles.detailLabel}>Address:</Text> {address}</Text>
-          <Text style={styles.detail}><Text style={styles.detailLabel}>Bio:</Text> {bio}</Text>
-        </View>
 
-        <View style={styles.infoContainer}>
-          <Text style={styles.detail}><Text style={styles.detailLabel}>About:</Text> {about}</Text>
-        </View>
-
-
+        {/* Buttons below username */}
         <View style={styles.buttonContainer}>
           <View style={styles.buttonRow}>
             <TouchableOpacity
@@ -1031,13 +1020,32 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
         </View>
+
+        <View style={styles.infoContainer}>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Name:</Text> {[firstName, middleName, lastName].filter(Boolean).join(' ') || "Not set"}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Gender:</Text> {sex || "Not set"}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Birthdate:</Text> {formattedDate || "Not set"}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Address:</Text> {address}</Text>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>Bio:</Text> {bio}</Text>
+        </View>
+
+        <View style={styles.infoContainer}>
+          <Text style={styles.detail}><Text style={styles.detailLabel}>About:</Text> {about}</Text>
+        </View>
       </View>
 
 
       {/* Artwork Galleries - visible only to artist/admin */}
       {(String(role || '').toLowerCase() === 'artist' || String(role || '').toLowerCase() === 'admin') && (
         <>
-          <Text style={styles.sectionTitle}>My Artwork</Text>
+          <View style={styles.artworkHeaderContainer}>
+            <Text style={[styles.sectionTitle, { marginTop: 0, marginBottom: 0, marginHorizontal: 0 }]}>My Artwork</Text>
+            <View style={styles.artworkBadge}>
+              <Text style={styles.artworkBadgeText}>
+                {galleryImages.length} {galleryImages.length === 1 ? 'piece' : 'pieces'}
+              </Text>
+            </View>
+          </View>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -1368,6 +1376,25 @@ const styles = StyleSheet.create({
     marginHorizontal: 15,
     marginTop: 25,
     marginBottom: 10,
+  },
+  artworkHeaderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 15,
+    marginTop: 25,
+    marginBottom: 10,
+  },
+  artworkBadge: {
+    backgroundColor: '#A68C7B',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginLeft: 8,
+  },
+  artworkBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
   galleryRow: { flexDirection: "row", paddingHorizontal: 10 },
   galleryItem: {
