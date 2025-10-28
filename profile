@@ -71,6 +71,28 @@ export default function ProfileScreen() {
   const [editArtMedium, setEditArtMedium] = useState("");
   const [editArtUploading, setEditArtUploading] = useState(false);
 
+  // Comments modal state
+  const [commentsModalVisible, setCommentsModalVisible] = useState(false);
+  const [commentingArt, setCommentingArt] = useState(null); // Store which art we're commenting on
+  
+  // Open comments modal - close artwork modal first
+  const openCommentsModal = async () => {
+    console.log('[profile] Opening comments modal, selectedArt:', selectedArt?.id);
+    setCommentingArt(selectedArt); // Save the artwork
+    setSelectedArt(null); // Close artwork modal
+    setCommentsModalVisible(true); // Open comments modal
+    if (selectedArt?.id) {
+      await fetchArtComments(selectedArt.id);
+    }
+  };
+  
+  // Close comments modal and go back to artwork
+  const closeCommentsModal = () => {
+    setCommentsModalVisible(false);
+    setSelectedArt(commentingArt); // Reopen artwork modal
+    setCommentingArt(null);
+  };
+
   // Apply as Artist modal state
   const [applyModalVisible, setApplyModalVisible] = useState(false);
   const [appFirstName, setAppFirstName] = useState("");
@@ -242,7 +264,9 @@ export default function ProfileScreen() {
 
 
   const postArtComment = async () => {
-    if (!selectedArt?.id || !artNewComment.trim()) return;
+    // Use commentingArt if in comments modal, otherwise use selectedArt
+    const artwork = commentingArt || selectedArt;
+    if (!artwork?.id || !artNewComment.trim()) return;
     const text = artNewComment.trim();
     setArtNewComment("");
     try {
@@ -258,10 +282,10 @@ export default function ProfileScreen() {
           'Content-Type': 'application/json',
           Cookie: `access_token=${at}; refresh_token=${rt}`,
         },
-        body: JSON.stringify({ artId: selectedArt.id, text }),
+        body: JSON.stringify({ artId: artwork.id, text }),
       });
       if (!res.ok) throw new Error('comment failed');
-      await fetchArtComments(selectedArt.id);
+      await fetchArtComments(artwork.id);
     } catch {}
   };
 
@@ -1363,42 +1387,26 @@ export default function ProfileScreen() {
                 {!!selectedArt?.timestamp && (
                   <Text style={{ fontSize: 12, color: '#888', marginTop: 8 }}>{selectedArt.timestamp}</Text>
                 )}
-             
 
                 <View style={{ height: 1, backgroundColor: '#eee', marginVertical: 10 }} />
                 
-                {/* Comments Section - Nested ScrollView */}
-                <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 10 }}>Comments</Text>
-                <ScrollView
-                  style={{ maxHeight: 120 }}
-                  keyboardShouldPersistTaps="handled"
-                  decelerationRate={Platform.OS === 'ios' ? 'fast' : 0.98}
-                  scrollEventThrottle={16}
-                  showsVerticalScrollIndicator
-                  nestedScrollEnabled
+                {/* Comments Button */}
+                <TouchableOpacity 
+                  onPress={openCommentsModal}
+                  style={{ 
+                    flexDirection: 'row', 
+                    alignItems: 'center', 
+                    backgroundColor: '#f5f5f5', 
+                    padding: 12, 
+                    borderRadius: 8,
+                    marginTop: 10
+                  }}
                 >
-                  {(artComments || []).map((c) => (
-                    <View key={c.id} style={{ flexDirection: 'row', marginBottom: 10 }}>
-                      <Image source={{ uri: c.user?.avatar }} style={{ width: 32, height: 32, borderRadius: 16, marginRight: 8 }} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontWeight: 'bold' }}>{c.user?.name}</Text>
-                        <Text>{c.text}</Text>
-                        {!!c.timestamp && (<Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{c.timestamp}</Text>)}
-                      </View>
-                    </View>
-                  ))}
-                </ScrollView>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
-                  <TextInput
-                    style={[styles.input, { flex: 1, marginRight: 8 }]}
-                    placeholder="Add a comment..."
-                    value={artNewComment}
-                    onChangeText={setArtNewComment}
-                  />
-                  <TouchableOpacity onPress={postArtComment} style={styles.saveButton}>
-                    <Text style={styles.saveButtonText}>Send</Text>
-                  </TouchableOpacity>
-                </View>
+                  <Ionicons name="chatbubble-outline" size={20} color="#A68C7B" />
+                  <Text style={{ marginLeft: 8, fontSize: 14, fontWeight: '600', color: '#333' }}>
+                    View Comments ({artComments?.length || 0})
+                  </Text>
+                </TouchableOpacity>
               </View>
             </ScrollView>
           </View>
@@ -1481,6 +1489,116 @@ export default function ProfileScreen() {
             </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Comments Modal - Separate from artwork modal */}
+      <Modal
+        visible={commentsModalVisible}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={closeCommentsModal}
+      >
+        <View style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
+          {/* Header */}
+          <View style={{ 
+            flexDirection: 'row', 
+            alignItems: 'center',
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            backgroundColor: '#fff',
+            borderBottomWidth: 1,
+            borderBottomColor: '#eee',
+            paddingTop: Platform.OS === 'ios' ? 50 : 12
+          }}>
+            <TouchableOpacity 
+              onPress={closeCommentsModal}
+              style={{ flexDirection: 'row', alignItems: 'center' }}
+            >
+              <Ionicons name="arrow-back" size={24} color="#333" />
+              <Text style={{ fontSize: 18, fontWeight: 'bold', marginLeft: 12, color: '#333' }}>Comments</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Comments List with side padding */}
+          <ScrollView 
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 16 }}
+            showsVerticalScrollIndicator
+            keyboardShouldPersistTaps="handled"
+          >
+            {(artComments || []).length === 0 ? (
+              <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 40 }}>
+                <Ionicons name="chatbubble-outline" size={48} color="#ccc" />
+                <Text style={{ marginTop: 12, color: '#999', fontSize: 14 }}>No comments yet</Text>
+                <Text style={{ marginTop: 4, color: '#999', fontSize: 12 }}>Be the first to comment!</Text>
+              </View>
+            ) : (
+              (artComments || []).map((c) => (
+                <View key={c.id} style={{ flexDirection: 'row', marginBottom: 16 }}>
+                  <Image 
+                    source={{ uri: c.user?.avatar }} 
+                    style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} 
+                  />
+                  <View style={{ flex: 1, backgroundColor: '#fff', padding: 12, borderRadius: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 }}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 14, marginBottom: 4 }}>{c.user?.name}</Text>
+                    <Text style={{ fontSize: 14, color: '#333' }}>{c.text}</Text>
+                    {!!c.timestamp && (
+                      <Text style={{ fontSize: 12, color: '#888', marginTop: 6 }}>{c.timestamp}</Text>
+                    )}
+                  </View>
+                </View>
+              ))
+            )}
+          </ScrollView>
+
+          {/* Comment Input - Fixed at Bottom */}
+          <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          >
+            <View style={{ 
+              borderTopWidth: 1, 
+              borderTopColor: '#e0e0e0', 
+              paddingHorizontal: 15,
+              paddingVertical: 6,
+              paddingBottom: Platform.OS === 'ios' ? 20 : 6,
+              backgroundColor: '#fff',
+              flexDirection: 'row',
+              alignItems: 'flex-end'
+            }}>
+              <TextInput
+                style={{
+                  flex: 1,
+                  paddingVertical: 6,
+                  paddingHorizontal: 15,
+                  fontSize: 16,
+                  borderRadius: 25,
+                  backgroundColor: '#f0f0f0',
+                  marginHorizontal: 8,
+                  maxHeight: 120
+                }}
+                placeholder="Add a comment..."
+                placeholderTextColor="#888"
+                value={artNewComment}
+                onChangeText={setArtNewComment}
+                multiline
+              />
+              <TouchableOpacity 
+                onPress={postArtComment} 
+                style={{
+                  backgroundColor: '#A68C7B',
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  justifyContent: 'center',
+                  alignItems: 'center'
+                }}
+              >
+                <Ionicons name="send" size={18} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       {/* Artwork Upload Modal */}
