@@ -59,7 +59,17 @@ export default function ProfileScreen() {
   const [artLikesCount, setArtLikesCount] = useState(0);
   const [artUserLiked, setArtUserLiked] = useState(false);
   const [artNewComment, setArtNewComment] = useState("");
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Edit artwork modal state
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingArt, setEditingArt] = useState(null);
+  const [editArtImage, setEditArtImage] = useState(null);
+  const [editArtTitle, setEditArtTitle] = useState("");
+  const [editArtDescription, setEditArtDescription] = useState("");
+  const [editArtMedium, setEditArtMedium] = useState("");
+  const [editArtUploading, setEditArtUploading] = useState(false);
 
   // Apply as Artist modal state
   const [applyModalVisible, setApplyModalVisible] = useState(false);
@@ -93,8 +103,8 @@ export default function ProfileScreen() {
         if (rt) setRefreshToken(rt);
       }
       const fd = new FormData();
-      // Backend expects single file under field name 'image'
-      fd.append("image", {
+      // Backend expects file under field name 'images'
+      fd.append("images", {
         uri: imageUri,
         name: "artwork.jpg",
         type: "image/jpeg",
@@ -146,6 +156,7 @@ export default function ProfileScreen() {
   useEffect(() => {
     const load = async () => {
       if (!selectedArt?.id) return;
+      setDescriptionExpanded(false); // Reset description state
       await Promise.all([
         fetchArtReacts(selectedArt.id),
         fetchArtComments(selectedArt.id),
@@ -252,6 +263,148 @@ export default function ProfileScreen() {
       if (!res.ok) throw new Error('comment failed');
       await fetchArtComments(selectedArt.id);
     } catch {}
+  };
+
+  // Open edit modal with artwork data
+  const handleEditArtwork = (art) => {
+    setEditingArt(art);
+    setEditArtTitle(art.title || '');
+    setEditArtDescription(art.description || '');
+    setEditArtMedium(art.medium || '');
+    setEditArtImage(null); // Don't pre-populate, let user choose new image
+    setSelectedArt(null); // Close detail modal
+    setEditModalVisible(true);
+  };
+
+  // Pick new image for edit
+  const pickEditArtworkImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+    });
+    if (!result.canceled) {
+      setEditArtImage({ uri: result.assets[0].uri });
+    }
+  };
+
+  // Submit edited artwork
+  const submitEditArtwork = async () => {
+    try {
+      if (!editArtTitle.trim()) {
+        Alert.alert('Error', 'Please enter a title');
+        return;
+      }
+      if (!editingArt?.id) {
+        Alert.alert('Error', 'Invalid artwork');
+        return;
+      }
+
+      setEditArtUploading(true);
+
+      let at = accessToken;
+      let rt = refreshToken;
+      if (!at || !rt) {
+        const { data } = await supabase.auth.getSession();
+        at = data?.session?.access_token || at;
+        rt = data?.session?.refresh_token || rt;
+      }
+
+      const formData = new FormData();
+      
+      // Add text fields
+      formData.append('title', editArtTitle);
+      formData.append('description', editArtDescription);
+      formData.append('medium', editArtMedium);
+
+      // Handle images based on whether user selected a new one
+      if (editArtImage?.uri) {
+        // New image selected - upload it
+        formData.append('images', {
+          uri: editArtImage.uri,
+          name: 'artwork.jpg',
+          type: 'image/jpeg',
+        });
+        // Mark old image for removal (append individually, not as JSON string)
+        if (editingArt.image) {
+          formData.append('imagesToRemove', editingArt.image);
+        }
+      } else {
+        // No new image selected - keep existing image (append individually)
+        if (editingArt.image) {
+          formData.append('existingImages', editingArt.image);
+        }
+      }
+
+      const res = await fetch(`${API_BASE}/profile/art/${editingArt.id}`, {
+        method: 'PUT',
+        headers: {
+          Cookie: `access_token=${at}; refresh_token=${rt}`,
+        },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || 'Update failed');
+      }
+
+      Alert.alert('Success', 'Artwork updated successfully!');
+      setEditModalVisible(false);
+      setEditingArt(null);
+      await fetchGallery(at, rt);
+    } catch (err) {
+      console.error('Edit artwork error:', err);
+      Alert.alert('Error', err.message || 'Failed to update artwork');
+    } finally {
+      setEditArtUploading(false);
+    }
+  };
+
+  // Delete artwork
+  const handleDeleteArtwork = (art) => {
+    Alert.alert(
+      'Delete Artwork',
+      'Are you sure you want to delete this artwork? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              let at = accessToken;
+              let rt = refreshToken;
+              if (!at || !rt) {
+                const { data } = await supabase.auth.getSession();
+                at = data?.session?.access_token || at;
+                rt = data?.session?.refresh_token || rt;
+              }
+
+              const res = await fetch(`${API_BASE}/profile/art/${art.id}`, {
+                method: 'DELETE',
+                headers: {
+                  Cookie: `access_token=${at}; refresh_token=${rt}`,
+                },
+              });
+
+              if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(errText || 'Delete failed');
+              }
+
+              Alert.alert('Success', 'Artwork deleted successfully!');
+              setSelectedArt(null); // Close modal
+              await fetchGallery(at, rt);
+            } catch (err) {
+              console.error('Delete artwork error:', err);
+              Alert.alert('Error', err.message || 'Failed to delete artwork');
+            }
+          },
+        },
+      ]
+    );
   };
   
 
@@ -645,16 +798,51 @@ export default function ProfileScreen() {
       const data = await res.json();
       const list = Array.isArray(data) ? data : (data?.arts || data || []);
       const items = list.map((a) => {
+        console.log('[profile.js] Raw artwork data:', JSON.stringify(a));
+        
         // Image is stored as JSONB array, extract first URL
         let imageUrl = null;
         if (Array.isArray(a?.image) && a.image.length > 0) {
           imageUrl = a.image[0];
+          console.log('[profile.js] Initial imageUrl from array:', imageUrl);
+          
+          // Handle double-encoded JSON strings (e.g., "[\"url\"]" instead of "url")
+          if (typeof imageUrl === 'string' && imageUrl.startsWith('[')) {
+            console.log('[profile.js] Detected double-encoded JSON, attempting to parse...');
+            try {
+              const parsed = JSON.parse(imageUrl);
+              console.log('[profile.js] Parsed result:', parsed);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                imageUrl = parsed[0];
+                console.log('[profile.js] Extracted URL from parsed array:', imageUrl);
+              }
+            } catch (e) {
+              console.error('[profile.js] Failed to parse double-encoded image:', imageUrl, e);
+            }
+          }
         } else if (typeof a?.image === 'string') {
           imageUrl = a.image;
+          console.log('[profile.js] imageUrl from string:', imageUrl);
         }
         
-        // Make URL absolute if needed
-        const abs = imageUrl ? (imageUrl.startsWith("http") ? imageUrl : `${API_ORIGIN}${imageUrl}`) : null;
+        // Make URL absolute if needed and validate
+        let abs = null;
+        if (imageUrl) {
+          // Remove any extra quotes or whitespace
+          imageUrl = String(imageUrl).trim().replace(/^"+|"+$/g, '');
+          console.log('[profile.js] Cleaned imageUrl:', imageUrl);
+          
+          if (imageUrl.startsWith("http")) {
+            abs = imageUrl;
+          } else if (imageUrl.startsWith("/")) {
+            abs = `${API_ORIGIN}${imageUrl}`;
+          } else {
+            abs = `${API_ORIGIN}/${imageUrl}`;
+          }
+        }
+        
+        console.log('[profile.js] Final processed URL:', abs);
+        console.log('[profile.js] =============================');
         
         return {
           id: a?.artId || a?.id || null,
@@ -664,7 +852,13 @@ export default function ProfileScreen() {
           medium: a?.medium || null,
           timestamp: a?.timestamp || a?.datePosted || null,
         };
-      }).filter(x => !!x.image);
+      }).filter(x => {
+        const hasImage = !!x.image;
+        if (!hasImage) {
+          console.log('[profile.js] Filtered out item with no image:', x.title);
+        }
+        return hasImage;
+      });
       setGalleryImages(items);
     } catch (e) {
       console.warn("Gallery fetch failed:", e?.message || e);
@@ -1055,7 +1249,14 @@ export default function ProfileScreen() {
           >
             {galleryImages.map((art, index) => (
               <TouchableOpacity key={index} onPress={() => setSelectedArt(art)}>
-                <Image source={{ uri: art.image }} style={styles.galleryItem} />
+                <Image 
+                  source={{ uri: art.image }} 
+                  style={styles.galleryItem}
+                  onError={(error) => {
+                    console.log('[profile.js] Gallery thumbnail error:', error.nativeEvent?.error);
+                    console.log('[profile.js] Failed thumbnail URI:', art.image);
+                  }}
+                />
               </TouchableOpacity>
             ))}
             <TouchableOpacity style={styles.addImageBox} onPress={handleAddImage}>
@@ -1074,40 +1275,107 @@ export default function ProfileScreen() {
             <TouchableOpacity onPress={() => setSelectedArt(null)} style={styles.modalCloseButton}>
               <Ionicons name="close" size={24} color="white" />
             </TouchableOpacity>
-            {/* Changed this block to ScrollView for vertical scroll */}
+            
+            {/* Fixed Image at top */}
+            {selectedArt?.image && (
+              <Image 
+                source={{ uri: selectedArt.image }} 
+                style={styles.artModalImage}
+                onError={(error) => {
+                  console.log('[profile.js] Image load error:', error.nativeEvent?.error);
+                  console.log('[profile.js] Failed image URI:', selectedArt.image);
+                }}
+              />
+            )}
+            
+            {/* Scrollable content below image */}
             <ScrollView
               contentContainerStyle={{ paddingBottom: 16 }}
               decelerationRate={Platform.OS === 'ios' ? 'fast' : 0.98}
               scrollEventThrottle={16}
               showsVerticalScrollIndicator
+              nestedScrollEnabled
             >
-              {selectedArt?.image && (
-               <Image source={{ uri: selectedArt.image }} style={styles.artModalImage} />   //BINAGO KO RON
-              )}
               <View style={{ padding: 12 }}>
                 
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                  {!!selectedArt?.title && (
-                    <Text style={{ fontSize: 18, fontWeight: 'bold', flex: 1 }}>{selectedArt.title}</Text>
-                  )}
-                  <TouchableOpacity onPress={handleToggleArtLike} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                {/* Row 1: Username and Heart */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <Text style={{ fontSize: 18, fontWeight: 'bold' }}>{username || 'Artist'}</Text>
+                  <TouchableOpacity onPress={handleToggleArtLike} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#f5f5f5', borderRadius: 20 }}>
                     <Icon name={artUserLiked ? 'heart' : 'heart-o'} size={22} color={artUserLiked ? 'red' : '#555'} />
-                    <Text style={{ marginLeft: 6 }}>{artLikesCount}</Text>
+                    <Text style={{ marginLeft: 8, fontWeight: '600' }}>{artLikesCount}</Text>
                   </TouchableOpacity>
                 </View>
 
-                {!!selectedArt?.medium && (<Text style={{ fontSize: 14, color: '#555', marginBottom: 8 }}>Medium: {selectedArt.medium}</Text>)}
-                {!!selectedArt?.description && (<Text style={{ fontSize: 14, color: '#222' }}>{selectedArt.description}</Text>)}
-                {!!selectedArt?.timestamp && (<Text style={{ fontSize: 12, color: '#888', marginTop: 10 }}>{selectedArt.timestamp}</Text>)}
+                {/* Row 2: By: Fullname and Edit/Delete Buttons */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <Text style={{ fontSize: 14, color: '#666' }}>
+                    by: {[firstName, middleName, lastName].filter(Boolean).join(' ') || username || 'Unknown'}
+                  </Text>
+                  
+                  {/* Edit/Delete buttons for artwork owner */}
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity 
+                      onPress={() => handleEditArtwork(selectedArt)} 
+                      style={{ backgroundColor: '#A68C7B', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 6, flexDirection: 'row', alignItems: 'center' }}
+                    >
+                      <Ionicons name="pencil" size={14} color="#fff" />
+                      <Text style={{ color: '#fff', marginLeft: 6, fontSize: 12, fontWeight: '600' }}>Edit</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      onPress={() => handleDeleteArtwork(selectedArt)} 
+                      style={{ backgroundColor: '#d9534f', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 6, flexDirection: 'row', alignItems: 'center' }}
+                    >
+                      <Ionicons name="trash" size={14} color="#fff" />
+                      <Text style={{ color: '#fff', marginLeft: 6, fontSize: 12, fontWeight: '600' }}>Delete</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Medium */}
+                {!!selectedArt?.medium && (
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#555', marginBottom: 4 }}>Medium:</Text>
+                    <Text style={{ fontSize: 14, color: '#222' }}>{selectedArt.medium}</Text>
+                  </View>
+                )}
+
+                {/* Description */}
+                {!!selectedArt?.description && (
+                  <View style={{ marginBottom: 8 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#555', marginBottom: 4 }}>Description:</Text>
+                    <Text style={{ fontSize: 14, color: '#222' }}>
+                      {descriptionExpanded || selectedArt.description.length <= 150
+                        ? selectedArt.description
+                        : `${selectedArt.description.substring(0, 150)}...`}
+                    </Text>
+                    {selectedArt.description.length > 150 && (
+                      <TouchableOpacity onPress={() => setDescriptionExpanded(!descriptionExpanded)} style={{ alignItems: 'center' }}>
+                        <Text style={{ fontSize: 14, color: '#A68C7B', fontWeight: '600', marginTop: 4 }}>
+                          {descriptionExpanded ? 'View Less' : 'View More'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+
+                {/* Date and time */}
+                {!!selectedArt?.timestamp && (
+                  <Text style={{ fontSize: 12, color: '#888', marginTop: 8 }}>{selectedArt.timestamp}</Text>
+                )}
              
 
                 <View style={{ height: 1, backgroundColor: '#eee', marginVertical: 10 }} />
+                
+                {/* Comments Section - Nested ScrollView */}
+                <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 10 }}>Comments</Text>
                 <ScrollView
-                  style={{ maxHeight: 220 }}
+                  style={{ maxHeight: 120 }}
                   keyboardShouldPersistTaps="handled"
                   decelerationRate={Platform.OS === 'ios' ? 'fast' : 0.98}
                   scrollEventThrottle={16}
                   showsVerticalScrollIndicator
+                  nestedScrollEnabled
                 >
                   {(artComments || []).map((c) => (
                     <View key={c.id} style={{ flexDirection: 'row', marginBottom: 10 }}>
@@ -1137,6 +1405,83 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
+      {/* Edit Artwork Modal */}
+      <Modal
+        visible={editModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setEditModalVisible(false)}
+      >
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <View style={styles.uploadModalOverlay}>
+            <View style={styles.uploadModalContent}>
+              <View style={styles.uploadModalHeader}>
+                <Text style={styles.uploadModalTitle}>Edit Artwork</Text>
+                <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                  <Ionicons name="close" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.uploadModalBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                {/* Image Picker */}
+                <TouchableOpacity style={styles.uploadImagePicker} onPress={pickEditArtworkImage}>
+                  {editArtImage ? (
+                    <Image source={editArtImage} style={styles.uploadPickedImage} />
+                  ) : (
+                    <View style={styles.uploadImagePlaceholder}>
+                      <Ionicons name="image-outline" size={48} color="#A68C7B" />
+                      <Text style={styles.uploadImageText}>{editingArt ? 'Tap to change image (keep current or select new)' : 'Tap to select image'}</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                {/* Title Input */}
+                <Text style={styles.uploadInputLabel}>Title *</Text>
+                <TextInput
+                  style={styles.uploadInput}
+                  placeholder="Enter artwork title"
+                  value={editArtTitle}
+                  onChangeText={setEditArtTitle}
+                />
+
+                {/* Medium Input */}
+                <Text style={styles.uploadInputLabel}>Medium</Text>
+                <TextInput
+                  style={styles.uploadInput}
+                  placeholder="e.g., Oil, Digital, Watercolor"
+                  value={editArtMedium}
+                  onChangeText={setEditArtMedium}
+                />
+
+                {/* Description Input */}
+                <Text style={styles.uploadInputLabel}>Description</Text>
+                <TextInput
+                  style={[styles.uploadInput, styles.uploadTextArea]}
+                  placeholder="Enter description"
+                  value={editArtDescription}
+                  onChangeText={setEditArtDescription}
+                  multiline
+                  numberOfLines={4}
+                />
+
+                {/* Update Button */}
+                <TouchableOpacity
+                  style={[styles.uploadButton, editArtUploading && styles.uploadButtonDisabled]}
+                  onPress={submitEditArtwork}
+                  disabled={editArtUploading}
+                >
+                  <Text style={styles.uploadButtonText}>
+                    {editArtUploading ? 'Updating...' : 'Update Artwork'}
+                  </Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* Artwork Upload Modal */}
       <Modal
