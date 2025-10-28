@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, Modal, TextInput, TouchableWithoutFeedback, FlatList, ScrollView, Platform, KeyboardAvoidingView, Keyboard, Dimensions, BackHandler, RefreshControl } from 'react-native';
+import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, Modal, TextInput, TouchableWithoutFeedback, FlatList, ScrollView, Platform, KeyboardAvoidingView, Keyboard, Dimensions, BackHandler, RefreshControl, Alert } from 'react-native';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -28,6 +28,11 @@ const HomeScreen = () => {
   const [role, setRole] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [menuVisiblePostId, setMenuVisiblePostId] = useState(null);
+  const [editingPostId, setEditingPostId] = useState(null);
+  const [existingImages, setExistingImages] = useState([]);
+  const [imagesToRemove, setImagesToRemove] = useState([]);
   
   // Art interests modal
   const [interestsModalVisible, setInterestsModalVisible] = useState(false);
@@ -277,7 +282,8 @@ const HomeScreen = () => {
     try {
       setLoading(true);
       const session = await supabase.auth.getSession();
-      const currentUserId = session?.data?.session?.user?.id;
+      const userId = session?.data?.session?.user?.id;
+      setCurrentUserId(userId);
 
 
       const res = await fetch(`${API_BASE}/homepage/getPost`, {
@@ -309,7 +315,7 @@ const HomeScreen = () => {
 
       const initialLikes = {};
       data.reacts?.forEach(r => {
-        if (r.userId === currentUserId) {
+        if (r.userId === userId) {
           initialLikes[r.postId] = true;
         }
       });
@@ -355,36 +361,63 @@ const HomeScreen = () => {
 
 
   const uploadPost = async () => {
-    if (!postText && pickedImages.length === 0) return;
-
+    if (!postText && pickedImages.length === 0 && existingImages.length === 0) return;
 
     const formData = new FormData();
+    // Both create and edit use 'description' field
     formData.append("description", String(postText ?? ""));
-    formData.append("text", String(postText ?? ""));
     
-    // Backend expects: file, file2, file3, file4 (max 4 images)
-    pickedImages.slice(0, 4).forEach((uri, index) => {
-      const filename = uri.split("/").pop();
-      const match = /\.(\w+)$/.exec(filename);
-      const type = match ? `image/${match[1]}` : `image/jpeg`;
+    // Check if we're editing or creating
+    const isEditing = editingPostId !== null;
+    
+    if (isEditing) {
+      // For editing: send existing images, new images, and images to remove
+      existingImages.forEach(imageUrl => {
+        formData.append('existingImages', imageUrl);
+      });
       
-      // Field names: file, file2, file3, file4
-      const fieldName = index === 0 ? "file" : `file${index + 1}`;
-      formData.append(fieldName, { uri, name: filename, type });
-    });
-
+      // Add new images with 'images' field name
+      pickedImages.forEach((uri) => {
+        const filename = uri.split("/").pop();
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? `image/${match[1]}` : `image/jpeg`;
+        formData.append('images', { uri, name: filename, type });
+      });
+      
+      // Add images to remove
+      imagesToRemove.forEach(imageUrl => {
+        formData.append('imagesToRemove', imageUrl);
+      });
+    } else {
+      // For creating: use file, file2, file3, file4 field names
+      pickedImages.slice(0, 4).forEach((uri, index) => {
+        const filename = uri.split("/").pop();
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? `image/${match[1]}` : `image/jpeg`;
+        const fieldName = index === 0 ? "file" : `file${index + 1}`;
+        formData.append(fieldName, { uri, name: filename, type });
+      });
+    }
 
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/homepage/createPost`, {
-        method: "POST",
+      
+      const url = isEditing 
+        ? `${API_BASE}/homepage/posts/${editingPostId}`
+        : `${API_BASE}/homepage/createPost`;
+      const method = isEditing ? "PUT" : "POST";
+      
+      const res = await fetch(url, {
+        method: method,
+        credentials: 'include',
         headers: {
           'Cookie': `access_token=${accessToken}; refresh_token=${refreshToken}`,
         },
         body: formData,
       });
+      
       if (!res.ok) {
-        let errMsg = `Failed to upload post (${res.status})`;
+        let errMsg = `Failed to ${isEditing ? 'update' : 'upload'} post (${res.status})`;
         try {
           const txt = await res.text();
           try {
@@ -397,14 +430,23 @@ const HomeScreen = () => {
         } catch {}
         throw new Error(errMsg);
       }
+      
       let data = null;
       try { data = await res.json(); } catch {}
+      
       setModalVisible(false);
       setPostText("");
       setPickedImages([]);
-      fetchPosts();
+      setEditingPostId(null);
+      setExistingImages([]);
+      setImagesToRemove([]);
+      
+      Alert.alert('Success', `Post ${isEditing ? 'updated' : 'created'} successfully!`);
+      // Refetch posts to get the updated data
+      await fetchPosts();
     } catch (err) {
       setError(err?.message || "Failed to upload post");
+      Alert.alert('Error', err?.message || "Failed to upload post");
     } finally {
       setLoading(false);
     }
@@ -646,7 +688,119 @@ const HomeScreen = () => {
   };
 
 
-  const renderPost = ({ item: post }) => (
+  const handleDeletePost = async (postId) => {
+    Alert.alert(
+      'Delete Post',
+      'Are you sure you want to delete this post? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const res = await fetch(`${API_BASE}/homepage/posts/${postId}`, {
+                method: 'DELETE',
+                credentials: 'include',
+                headers: {
+                  'Cookie': `access_token=${accessToken}; refresh_token=${refreshToken}`,
+                },
+              });
+              if (res.ok) {
+                setPosts(prev => prev.filter(p => p.id !== postId));
+                setMenuVisiblePostId(null);
+                Alert.alert('Success', 'Post deleted successfully');
+              } else {
+                const errorData = await res.json().catch(() => ({}));
+                console.error('Failed to delete post:', errorData.error);
+                Alert.alert('Error', 'Failed to delete post');
+              }
+            } catch (err) {
+              Alert.alert('Error', 'Error deleting post');
+              console.error(err);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleEditPost = (post) => {
+    setMenuVisiblePostId(null);
+    setEditingPostId(post.id);
+    setPostText(post.text || '');
+    
+    // Load existing images from post
+    const postImages = post.image || post.images;
+    const imageArray = Array.isArray(postImages) ? postImages : (postImages ? [postImages] : []);
+    setExistingImages(imageArray);
+    
+    // Clear new images and images to remove
+    setPickedImages([]);
+    setImagesToRemove([]);
+    
+    setModalVisible(true);
+  };
+
+  const handleReportPost = async (postId) => {
+    try {
+      Alert.alert(
+        'Report Post',
+        'Are you sure you want to report this post? Our team will review it.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Report',
+            style: 'destructive',
+            onPress: async () => {
+              await submitReport(postId);
+            }
+          }
+        ]
+      );
+    } catch (err) {
+      console.error('Report error:', err);
+    }
+  };
+
+  const submitReport = async (postId) => {
+    try {
+      const res = await fetch(`${API_BASE}/homepage/reportPost`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': `access_token=${accessToken}; refresh_token=${refreshToken}`,
+        },
+        body: JSON.stringify({ postId }),
+      });
+      
+      if (res.ok) {
+        Alert.alert('Success', 'Post reported successfully. Our team will review it.');
+      } else {
+        Alert.alert('Error', 'Failed to report post. Please try again.');
+      }
+    } catch (err) {
+      Alert.alert('Error', 'Error reporting post');
+      console.error(err);
+    }
+  };
+
+  const renderPost = ({ item: post }) => {
+    // Check if current user owns this post - match web frontend logic
+    // Web checks: currentUser?.id === item.userId
+    const postOwnerId = post.userId || post.user?.id || post.user?.userId || post.user_id;
+    const isOwnPost = currentUserId && postOwnerId === currentUserId;
+    
+    // Debug logging
+    console.log('[home.js] Post ownership check:', {
+      currentUserId,
+      postOwnerId,
+      'post.userId': post.userId,
+      'post.user': post.user,
+      isOwnPost
+    });
+    
+    return (
     <View key={post.id} style={styles.card}>
       <View style={styles.userInfo}>
         {(() => {
@@ -658,6 +812,48 @@ const HomeScreen = () => {
           );
         })()}
         <Text style={styles.username}>{post.user?.name}</Text>
+        
+        {/* Three-dot menu for own posts */}
+        {isOwnPost && (
+          <View style={{ marginLeft: 'auto', position: 'relative' }}>
+            <TouchableOpacity 
+              onPress={() => setMenuVisiblePostId(menuVisiblePostId === post.id ? null : post.id)}
+              style={{ padding: 8 }}
+            >
+              <Ionicons name="ellipsis-horizontal" size={24} color="#555" />
+            </TouchableOpacity>
+            
+            {/* Dropdown menu */}
+            {menuVisiblePostId === post.id && (
+              <View style={styles.dropdownMenu}>
+                <TouchableOpacity 
+                  style={styles.menuItem}
+                  onPress={() => handleEditPost(post)}
+                >
+                  <Ionicons name="pencil-outline" size={18} color="#555" />
+                  <Text style={styles.menuItemText}>Edit</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.menuItem, { borderTopWidth: 1, borderTopColor: '#eee' }]}
+                  onPress={() => handleDeletePost(post.id)}
+                >
+                  <Ionicons name="trash-outline" size={18} color="#d9534f" />
+                  <Text style={[styles.menuItemText, { color: '#d9534f' }]}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Report button for other users' posts */}
+        {!isOwnPost && currentUserId && (
+          <TouchableOpacity 
+            onPress={() => handleReportPost(post.id)}
+            style={{ marginLeft: 'auto', padding: 8 }}
+          >
+            <Ionicons name="flag-outline" size={22} color="#555" />
+          </TouchableOpacity>
+        )}
       </View>
 
 
@@ -728,7 +924,8 @@ const HomeScreen = () => {
         </TouchableOpacity>
       </View>
     </View>
-  );
+    );
+  };
 
   const renderEvent = ({ item: announcementPost }) => {
     // For announcement posts, look up full event data using eventId
@@ -793,23 +990,27 @@ const HomeScreen = () => {
   };
 
 
-  // Updated render function for comments to include timestamp below each comment
+  // Chat bubble style comment render
   const renderComment = ({ item }) => (
-    <View style={styles.commentBox}>
+    <View style={{ flexDirection: 'row', marginBottom: 16, paddingHorizontal: 16 }}>
       {(() => {
         const avatarUri = ensureUri(item.user?.avatar);
         return avatarUri ? (
-          <Image source={{ uri: avatarUri }} style={styles.avatar} />
+          <Image 
+            source={{ uri: avatarUri }} 
+            style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} 
+          />
         ) : (
-          <View style={[styles.avatar, styles.placeholderCircle]} />
+          <View style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12, backgroundColor: '#ddd', justifyContent: 'center', alignItems: 'center' }}>
+            <Ionicons name="person" size={24} color="#999" />
+          </View>
         );
       })()}
-      <View style={{ flex: 1 }}>
-        <Text style={{ fontWeight: 'bold' }}>{item.user?.name}</Text>
-        <Text>{item.text}</Text>
-        {/* Show comment timestamp below comment text */}
+      <View style={{ flex: 1, backgroundColor: '#fff', padding: 12, borderRadius: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 }}>
+        <Text style={{ fontWeight: 'bold', fontSize: 14, marginBottom: 4 }}>{item.user?.name}</Text>
+        <Text style={{ fontSize: 14, color: '#333' }}>{item.text}</Text>
         {!!item.timestamp && (
-          <Text style={styles.commentTimestamp}>{item.timestamp}</Text>
+          <Text style={{ fontSize: 12, color: '#888', marginTop: 6 }}>{item.timestamp}</Text>
         )}
       </View>
     </View>
@@ -888,7 +1089,14 @@ const HomeScreen = () => {
 
 
       {(role === "artist" || role === "admin") && (
-        <TouchableOpacity style={styles.postOverlayBox} onPress={() => setModalVisible(true)}>
+        <TouchableOpacity style={styles.postOverlayBox} onPress={() => {
+          setEditingPostId(null);
+          setPostText('');
+          setPickedImages([]);
+          setExistingImages([]);
+          setImagesToRemove([]);
+          setModalVisible(true);
+        }}>
           {/* Show user's profile avatar if available; fallback keeps same size */}
   
           <Ionicons name="create-outline" size={24} color="#555" style={{ marginRight: 8 }} />
@@ -902,6 +1110,8 @@ const HomeScreen = () => {
         keyExtractor={(item) => `${item.itemType}-${item.id || item.eventId}`}
         renderItem={({ item }) => item.itemType === 'event' ? renderEvent({ item }) : renderPost({ item })}
         contentContainerStyle={{ paddingBottom: 120 }}
+        onScroll={() => setMenuVisiblePostId(null)}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -921,7 +1131,15 @@ const HomeScreen = () => {
                 Try searching for different keywords
               </Text>
             </View>
-          ) : null
+          ) : (
+            <View style={styles.noResults}>
+              <Ionicons name="albums-outline" size={64} color="#ccc" />
+              <Text style={styles.noResultsTitle}>No posts yet</Text>
+              <Text style={styles.noResultsText}>
+                Be the first to share something!
+              </Text>
+            </View>
+          )
         }
       />
 
@@ -1001,7 +1219,14 @@ const HomeScreen = () => {
 
 
       {/* Create Post modal */}
-      <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
+      <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => {
+        setModalVisible(false);
+        setEditingPostId(null);
+        setPostText('');
+        setPickedImages([]);
+        setExistingImages([]);
+        setImagesToRemove([]);
+      }}>
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={{ flex: 1 }}
@@ -1009,8 +1234,15 @@ const HomeScreen = () => {
           <View style={styles.uploadModalOverlay}>
             <View style={styles.uploadModalContent}>
               <View style={styles.uploadModalHeader}>
-                <Text style={styles.uploadModalTitle}>Create Post</Text>
-                <TouchableOpacity onPress={() => setModalVisible(false)}>
+                <Text style={styles.uploadModalTitle}>{editingPostId ? 'Edit Post' : 'Create Post'}</Text>
+                <TouchableOpacity onPress={() => {
+                  setModalVisible(false);
+                  setEditingPostId(null);
+                  setPostText('');
+                  setPickedImages([]);
+                  setExistingImages([]);
+                  setImagesToRemove([]);
+                }}>
                   <Ionicons name="close" size={24} color="#333" />
                 </TouchableOpacity>
               </View>
@@ -1043,8 +1275,28 @@ const HomeScreen = () => {
                   showsHorizontalScrollIndicator={false}
                   style={{ marginBottom: 16 }}
                 >
+                  {/* Show existing images when editing */}
+                  {existingImages.map((imageUrl, index) => (
+                    <View key={`existing-${index}`} style={styles.postImageContainer}>
+                      <Image
+                        source={{ uri: imageUrl }}
+                        style={styles.postPreviewImage}
+                      />
+                      <TouchableOpacity 
+                        onPress={() => {
+                          setExistingImages(prev => prev.filter((_, i) => i !== index));
+                          setImagesToRemove(prev => [...prev, imageUrl]);
+                        }} 
+                        style={styles.postRemoveBtn}
+                      >
+                        <Ionicons name="close-circle" size={26} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  
+                  {/* Show new images */}
                   {pickedImages.map((item, index) => (
-                    <View key={index} style={styles.postImageContainer}>
+                    <View key={`new-${index}`} style={styles.postImageContainer}>
                       <Image
                         source={{ uri: Array.isArray(item) ? item[0] : item }}
                         style={styles.postPreviewImage}
@@ -1054,6 +1306,7 @@ const HomeScreen = () => {
                       </TouchableOpacity>
                     </View>
                   ))}
+                  
                   <View style={styles.postImageContainer}>
                     <TouchableOpacity onPress={pickImage} style={styles.postAddPhotoBtn}>
                       <Ionicons name="image-outline" size={32} color="#A68C7B" />
@@ -1063,8 +1316,8 @@ const HomeScreen = () => {
                 </ScrollView>
 
                 {/* Post Button */}
-                <TouchableOpacity style={styles.uploadButton} onPress={uploadPost}>
-                  <Text style={styles.uploadButtonText}>Post</Text>
+                <TouchableOpacity style={styles.uploadButton} onPress={uploadPost} disabled={loading}>
+                  <Text style={styles.uploadButtonText}>{editingPostId ? 'Update' : 'Post'}</Text>
                 </TouchableOpacity>
               </ScrollView>
             </View>
@@ -1075,7 +1328,7 @@ const HomeScreen = () => {
 
       {/* Comments Modal */}
       <Modal visible={commentModalVisible} animationType="slide">
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={{ flex: 1 }}
@@ -1098,12 +1351,13 @@ const HomeScreen = () => {
                   <Text style={styles.emptyCommentsSubtext}>Be the first to comment!</Text>
                 </View>
               }
-              contentContainerStyle={currentPostComments.length === 0 ? { flex: 1 } : {}}
+              contentContainerStyle={currentPostComments.length === 0 ? { flex: 1 } : { paddingVertical: 16 }}
             />
             <View style={styles.commentInputContainer}>
               <TextInput
                 style={styles.commentInput}
                 placeholder="Add a comment..."
+                placeholderTextColor="#999"
                 value={newCommentText}
                 onChangeText={setNewCommentText}
               />
@@ -1842,6 +2096,33 @@ const styles = StyleSheet.create({
   categoryItemText: {
     fontSize: 14,
     color: '#333',
+  },
+  dropdownMenu: {
+    position: 'absolute',
+    top: 40,
+    right: 0,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingVertical: 4,
+    minWidth: 120,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    zIndex: 1000,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  menuItemText: {
+    marginLeft: 12,
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#555',
   },
 });
 
