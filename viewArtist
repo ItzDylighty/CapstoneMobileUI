@@ -49,7 +49,19 @@ export default function ProfileScreen() {
   const [artLikesCount, setArtLikesCount] = useState(0);
   const [artUserLiked, setArtUserLiked] = useState(false);
   const [artNewComment, setArtNewComment] = useState("");
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [viewedUserId, setViewedUserId] = useState(null);
+
+  // Edit artwork modal state
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingArt, setEditingArt] = useState(null);
+  const [editArtImage, setEditArtImage] = useState(null);
+  const [editArtTitle, setEditArtTitle] = useState("");
+  const [editArtDescription, setEditArtDescription] = useState("");
+  const [editArtMedium, setEditArtMedium] = useState("");
+  const [editArtUploading, setEditArtUploading] = useState(false);
 
   // Android hardware back: always go back to artists.js
   useEffect(() => {
@@ -86,6 +98,11 @@ export default function ProfileScreen() {
       if (bday) setBirthday(new Date(bday));
       setImage(avatarUrl ? { uri: avatarUrl } : null);
       setBackgroundImage(coverUrl ? { uri: coverUrl } : null);
+      // Store viewed user's ID for comparison - try multiple field names
+      const vUserId = profile?.userId || profile?.user_id || profile?.id || profile?.artistId || null;
+      setViewedUserId(vUserId);
+      console.log('[viewArtist] Viewed artist userId:', vUserId);
+      console.log('[viewArtist] Full profile data:', profile);
     } catch {}
   };
 
@@ -112,12 +129,35 @@ export default function ProfileScreen() {
         let imageUrl = null;
         if (Array.isArray(a?.image) && a.image.length > 0) {
           imageUrl = a.image[0];
+          
+          // Handle double-encoded JSON strings (e.g., "[\"url\"]" instead of "url")
+          if (typeof imageUrl === 'string' && imageUrl.startsWith('[')) {
+            try {
+              const parsed = JSON.parse(imageUrl);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                imageUrl = parsed[0];
+              }
+            } catch (e) {
+              console.log('[viewArtist] Failed to parse double-encoded image:', imageUrl);
+            }
+          }
         } else if (typeof a?.image === 'string') {
           imageUrl = a.image;
         }
         
-        // Make URL absolute if needed
-        const abs = imageUrl ? (imageUrl.startsWith('http') ? imageUrl : `${API_ORIGIN}${imageUrl}`) : null;
+        // Make URL absolute if needed and validate
+        let abs = null;
+        if (imageUrl) {
+          imageUrl = String(imageUrl).trim().replace(/^"+|"+$/g, '');
+          
+          if (imageUrl.startsWith('http')) {
+            abs = imageUrl;
+          } else if (imageUrl.startsWith('/')) {
+            abs = `${API_ORIGIN}${imageUrl}`;
+          } else {
+            abs = `${API_ORIGIN}/${imageUrl}`;
+          }
+        }
         
         return {
           id: a?.artId || a?.id || null,
@@ -148,7 +188,7 @@ export default function ProfileScreen() {
         if (rt) setRefreshToken(rt);
       }
       const fd = new FormData();
-      fd.append("image", { uri: imageUri, name: "artwork.jpg", type: "image/jpeg" });
+      fd.append("images", { uri: imageUri, name: "artwork.jpg", type: "image/jpeg" });
       if (meta.title != null) fd.append("title", String(meta.title));
       if (meta.description != null) fd.append("description", String(meta.description));
       if (meta.medium != null) fd.append("medium", String(meta.medium));
@@ -177,6 +217,7 @@ export default function ProfileScreen() {
   useEffect(() => {
     const load = async () => {
       if (!selectedArt?.id) return;
+      setDescriptionExpanded(false); // Reset description state
       await Promise.all([fetchArtReacts(selectedArt.id), fetchArtComments(selectedArt.id)]);
     };
     load();
@@ -222,6 +263,35 @@ export default function ProfileScreen() {
       const json = await res.json();
       setArtComments(json?.comments || []);
     } catch {}
+  };
+
+  const fetchArtViewCount = async (artId) => {
+    try {
+      let at = accessToken, rt = refreshToken;
+      if (!at || !rt) {
+        const { data } = await supabase.auth.getSession();
+        at = data?.session?.access_token || at;
+        rt = data?.session?.refresh_token || rt;
+      }
+      console.log('[viewArtist] Fetching view count for artId:', artId);
+      const res = await fetch(`${API_BASE}/gallery/views?galleryArtId=${artId}`, {
+        method: "GET",
+        headers: { Cookie: `access_token=${at}; refresh_token=${rt}` },
+      });
+      console.log('[viewArtist] View count response status:', res.status);
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.log('[viewArtist] fetchArtViewCount failed:', res.status, errorText);
+        setArtViewCount(0);
+        return;
+      }
+      const data = await res.json();
+      console.log('[viewArtist] View count data:', data);
+      setArtViewCount(data?.viewCount || 0);
+    } catch (err) {
+      console.error('[viewArtist] fetchArtViewCount error:', err);
+      setArtViewCount(0);
+    }
   };
 
   const handleToggleArtLike = async () => {
@@ -320,6 +390,158 @@ export default function ProfileScreen() {
     }
   };
 
+  // Open edit modal with artwork data
+  const handleEditArtwork = (art) => {
+    setEditingArt(art);
+    setEditArtTitle(art.title || '');
+    setEditArtDescription(art.description || '');
+    setEditArtMedium(art.medium || '');
+    setEditArtImage(null); // Don't pre-populate, let user choose new image
+    setSelectedArt(null); // Close detail modal
+    setEditModalVisible(true);
+  };
+
+  // Pick new image for edit
+  const pickEditArtworkImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+    });
+    if (!result.canceled) {
+      setEditArtImage({ uri: result.assets[0].uri });
+    }
+  };
+
+  // Submit edited artwork
+  const submitEditArtwork = async () => {
+    try {
+      if (!editArtTitle.trim()) {
+        Alert.alert('Error', 'Please enter a title');
+        return;
+      }
+      if (!editingArt?.id) {
+        Alert.alert('Error', 'Invalid artwork');
+        return;
+      }
+
+      setEditArtUploading(true);
+
+      let at = accessToken;
+      let rt = refreshToken;
+      if (!at || !rt) {
+        const { data } = await supabase.auth.getSession();
+        at = data?.session?.access_token || at;
+        rt = data?.session?.refresh_token || rt;
+      }
+
+      const formData = new FormData();
+      
+      // Add text fields
+      formData.append('title', editArtTitle);
+      formData.append('description', editArtDescription);
+      formData.append('medium', editArtMedium);
+
+      // Handle images based on whether user selected a new one
+      if (editArtImage?.uri) {
+        // New image selected - upload it
+        formData.append('images', {
+          uri: editArtImage.uri,
+          name: 'artwork.jpg',
+          type: 'image/jpeg',
+        });
+        // Mark old image for removal (append individually, not as JSON string)
+        if (editingArt.image) {
+          formData.append('imagesToRemove', editingArt.image);
+        }
+      } else {
+        // No new image selected - keep existing image (append individually)
+        if (editingArt.image) {
+          formData.append('existingImages', editingArt.image);
+        }
+      }
+
+      const res = await fetch(`${API_BASE}/profile/art/${editingArt.id}`, {
+        method: 'PUT',
+        headers: {
+          Cookie: `access_token=${at}; refresh_token=${rt}`,
+        },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || 'Update failed');
+      }
+
+      Alert.alert('Success', 'Artwork updated successfully!');
+      setEditModalVisible(false);
+      setEditingArt(null);
+      // Refresh appropriate gallery
+      if (isViewingOther) {
+        await fetchViewedGallery(at, rt);
+      } else {
+        await fetchGallery(at, rt);
+      }
+    } catch (err) {
+      console.error('Edit artwork error:', err);
+      Alert.alert('Error', err.message || 'Failed to update artwork');
+    } finally {
+      setEditArtUploading(false);
+    }
+  };
+
+  // Delete artwork
+  const handleDeleteArtwork = (art) => {
+    Alert.alert(
+      'Delete Artwork',
+      'Are you sure you want to delete this artwork? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              let at = accessToken;
+              let rt = refreshToken;
+              if (!at || !rt) {
+                const { data } = await supabase.auth.getSession();
+                at = data?.session?.access_token || at;
+                rt = data?.session?.refresh_token || rt;
+              }
+
+              const res = await fetch(`${API_BASE}/profile/art/${art.id}`, {
+                method: 'DELETE',
+                headers: {
+                  Cookie: `access_token=${at}; refresh_token=${rt}`,
+                },
+              });
+
+              if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(errText || 'Delete failed');
+              }
+
+              Alert.alert('Success', 'Artwork deleted successfully!');
+              setSelectedArt(null); // Close modal
+              // Refresh appropriate gallery
+              if (isViewingOther) {
+                await fetchViewedGallery(at, rt);
+              } else {
+                await fetchGallery(at, rt);
+              }
+            } catch (err) {
+              console.error('Delete artwork error:', err);
+              Alert.alert('Error', err.message || 'Failed to delete artwork');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const fetchRole = async (at, rt) => {
     try {
       const res = await fetch(`${API_BASE}/users/role`, {
@@ -346,16 +568,27 @@ export default function ProfileScreen() {
         const { data } = await supabase.auth.getSession();
         const at = data?.session?.access_token || null;
         const rt = data?.session?.refresh_token || null;
+        const userId = data?.session?.user?.id || null;
         setAccessToken(at);
         setRefreshToken(rt);
+        setCurrentUserId(userId);
+        console.log('[viewArtist] Current user ID:', userId);
+        
+        // Always fetch role for button visibility checks
+        let userRole = null;
+        if (at && rt) {
+          userRole = await fetchRole(at, rt);
+          console.log('[viewArtist] Fetched user role:', userRole);
+        }
+        
         if (isViewingOther && at && rt) {
           // Load selected artist by id
           await fetchViewedProfile(at, rt);
           await fetchViewedGallery(at, rt);
         } else if (at && rt) {
-          const r = await fetchRole(at, rt);
           await fetchProfile(at, rt);
-          if (String(r || '').toLowerCase() === 'artist' || String(r || '').toLowerCase() === 'admin') {
+          const r = String(userRole || '').toLowerCase();
+          if (r === 'artist' || r === 'admin') {
             await fetchGallery(at, rt);
           } else {
             setGalleryImages([]);
@@ -368,7 +601,18 @@ export default function ProfileScreen() {
     init();
   }, [isViewingOther, viewedId]);
 
-  useEffect(() => {}, [role]); // Optionally keep for debugging
+  // Debug: Log button visibility conditions
+  useEffect(() => {
+    console.log('[viewArtist] ======= BUTTON VISIBILITY CHECK =======');
+    console.log('[viewArtist] currentUserId:', currentUserId);
+    console.log('[viewArtist] viewedUserId:', viewedUserId);
+    console.log('[viewArtist] isViewingOther:', isViewingOther);
+    console.log('[viewArtist] role:', role);
+    console.log('[viewArtist] IDs match:', currentUserId === viewedUserId);
+    console.log('[viewArtist] Is artist/admin:', role === 'artist' || role === 'admin');
+    console.log('[viewArtist] shouldShow:', currentUserId && ((isViewingOther && currentUserId === viewedUserId) || (!isViewingOther)) && (role === 'artist' || role === 'admin'));
+    console.log('[viewArtist] ======================================');
+  }, [currentUserId, viewedUserId, isViewingOther, role]);
 
   const fetchSupabaseProfile = async () => {
     try {
@@ -439,6 +683,8 @@ export default function ProfileScreen() {
       const coverUrl = resolveUrl(p.coverPicture);
       setImage(avatarUrl ? { uri: avatarUrl } : null);
       setBackgroundImage(coverUrl ? { uri: coverUrl } : null);
+      // Store own userId for comparison
+      setViewedUserId(p.userId || currentUserId);
     } catch {
       await fetchSupabaseProfile();
     }
@@ -463,12 +709,35 @@ export default function ProfileScreen() {
         let imageUrl = null;
         if (Array.isArray(a?.image) && a.image.length > 0) {
           imageUrl = a.image[0];
+          
+          // Handle double-encoded JSON strings (e.g., "[\"url\"]" instead of "url")
+          if (typeof imageUrl === 'string' && imageUrl.startsWith('[')) {
+            try {
+              const parsed = JSON.parse(imageUrl);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                imageUrl = parsed[0];
+              }
+            } catch (e) {
+              console.log('[viewArtist] Failed to parse double-encoded image:', imageUrl);
+            }
+          }
         } else if (typeof a?.image === 'string') {
           imageUrl = a.image;
         }
         
-        // Make URL absolute if needed
-        const abs = imageUrl ? (imageUrl.startsWith("http") ? imageUrl : `${API_ORIGIN}${imageUrl}`) : null;
+        // Make URL absolute if needed and validate
+        let abs = null;
+        if (imageUrl) {
+          imageUrl = String(imageUrl).trim().replace(/^"+|"+$/g, '');
+          
+          if (imageUrl.startsWith("http")) {
+            abs = imageUrl;
+          } else if (imageUrl.startsWith("/")) {
+            abs = `${API_ORIGIN}${imageUrl}`;
+          } else {
+            abs = `${API_ORIGIN}/${imageUrl}`;
+          }
+        }
         
         return {
           id: a?.artId || a?.id || null,
@@ -584,10 +853,17 @@ export default function ProfileScreen() {
       {/* Artwork Galleries - horizontal, view-only (no add button) - only show if artworks exist */}
       {galleryImages.length > 0 && (
         <>
-          <Text style={styles.sectionTitle}>Artist's Portfolio</Text>
+          <View style={styles.artworkHeaderContainer}>
+            <Text style={[styles.sectionTitle, { marginTop: 0, marginBottom: 0, marginHorizontal: 0 }]}>Artist's Portfolio</Text>
+            <View style={styles.artworkBadge}>
+              <Text style={styles.artworkBadgeText}>
+                {galleryImages.length} {galleryImages.length === 1 ? 'piece' : 'pieces'}
+              </Text>
+            </View>
+          </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.galleryRow}>
             {galleryImages.map((art, index) => (
-              <TouchableOpacity key={index} onPress={() => setSelectedArt(art)}>
+              <TouchableOpacity key={index} onPress={() => setSelectedArt(art)} style={{ marginRight: 10 }}>
                 <Image source={{ uri: art.image }} style={styles.galleryItem} />
               </TouchableOpacity>
             ))}
@@ -603,39 +879,112 @@ export default function ProfileScreen() {
             <TouchableOpacity onPress={() => setSelectedArt(null)} style={styles.modalCloseButton}>
               <Ionicons name="close" size={24} color="white" />
             </TouchableOpacity>
-            {/* Changed this block to ScrollView for vertical scroll */}
+            
+            {/* Fixed Image at top */}
+            {selectedArt?.image && (
+              <Image source={{ uri: selectedArt.image }} style={styles.artModalImage} />
+            )}
+            
+            {/* Scrollable content below image */}
             <ScrollView
               contentContainerStyle={{ paddingBottom: 16 }}
               decelerationRate={Platform.OS === 'ios' ? 'fast' : 0.98}
               scrollEventThrottle={16}
               showsVerticalScrollIndicator
+              nestedScrollEnabled
             >
-              {selectedArt?.image && (
-                <Image source={{ uri: selectedArt.image }} style={styles.artModalImage} />
-              )}
               <View style={{ padding: 12 }}>
                 
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                  {!!selectedArt?.title && (
-                    <Text style={{ fontSize: 18, fontWeight: 'bold', flex: 1 }}>{selectedArt.title}</Text>
-                  )}
-                  <TouchableOpacity onPress={handleToggleArtLike} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                {/* Row 1: Username and Heart */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <Text style={{ fontSize: 18, fontWeight: 'bold' }}>{username || 'Artist'}</Text>
+                  <TouchableOpacity onPress={handleToggleArtLike} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#f5f5f5', borderRadius: 20 }}>
                     <Icon name={artUserLiked ? 'heart' : 'heart-o'} size={22} color={artUserLiked ? 'red' : '#555'} />
-                    <Text style={{ marginLeft: 6 }}>{artLikesCount}</Text>
+                    <Text style={{ marginLeft: 8, fontWeight: '600' }}>{artLikesCount}</Text>
                   </TouchableOpacity>
                 </View>
 
-                {!!selectedArt?.medium && (<Text style={{ fontSize: 14, color: '#555', marginBottom: 8 }}>Medium: {selectedArt.medium}</Text>)}
-                {!!selectedArt?.description && (<Text style={{ fontSize: 14, color: '#222' }}>{selectedArt.description}</Text>)}
-                {!!selectedArt?.timestamp && (<Text style={{ fontSize: 12, color: '#888', marginTop: 10 }}>{selectedArt.timestamp}</Text>)}
+                {/* Row 2: By: Fullname and Action Buttons */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <Text style={{ fontSize: 14, color: '#666' }}>
+                    by: {[firstName, middleName, lastName].filter(Boolean).join(' ') || username || 'Unknown'}
+                  </Text>
+                  
+                  {/* Edit/Delete buttons - only show if current user is the artist owner or admin */}
+                  {currentUserId && ((isViewingOther && currentUserId === viewedUserId) || (!isViewingOther)) && (role === 'artist' || role === 'admin') && (
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <TouchableOpacity 
+                        onPress={() => handleEditArtwork(selectedArt)} 
+                        style={{ backgroundColor: '#A68C7B', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 6, flexDirection: 'row', alignItems: 'center' }}
+                      >
+                        <Ionicons name="pencil" size={14} color="#fff" />
+                        <Text style={{ color: '#fff', marginLeft: 6, fontSize: 12, fontWeight: '600' }}>Edit</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        onPress={() => handleDeleteArtwork(selectedArt)} 
+                        style={{ backgroundColor: '#d9534f', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 6, flexDirection: 'row', alignItems: 'center' }}
+                      >
+                        <Ionicons name="trash" size={14} color="#fff" />
+                        <Text style={{ color: '#fff', marginLeft: 6, fontSize: 12, fontWeight: '600' }}>Delete</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {/* Report button - show for users viewing other people's artwork */}
+                  {currentUserId && !(currentUserId && ((isViewingOther && currentUserId === viewedUserId) || (!isViewingOther)) && (role === 'artist' || role === 'admin')) && (
+                    <TouchableOpacity 
+                      onPress={() => Alert.alert('Report', 'Report functionality coming soon')} 
+                      style={{ backgroundColor: '#A68C7B', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 6, flexDirection: 'row', alignItems: 'center' }}
+                    >
+                      <Ionicons name="flag" size={14} color="#fff" />
+                      <Text style={{ color: '#fff', marginLeft: 6, fontSize: 12, fontWeight: '600' }}>Report</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Medium */}
+                {!!selectedArt?.medium && (
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#555', marginBottom: 4 }}>Medium:</Text>
+                    <Text style={{ fontSize: 14, color: '#222' }}>{selectedArt.medium}</Text>
+                  </View>
+                )}
+
+                {/* Description */}
+                {!!selectedArt?.description && (
+                  <View style={{ marginBottom: 8 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#555', marginBottom: 4 }}>Description:</Text>
+                    <Text style={{ fontSize: 14, color: '#222' }}>
+                      {descriptionExpanded || selectedArt.description.length <= 150
+                        ? selectedArt.description
+                        : `${selectedArt.description.substring(0, 150)}...`}
+                    </Text>
+                    {selectedArt.description.length > 150 && (
+                      <TouchableOpacity onPress={() => setDescriptionExpanded(!descriptionExpanded)} style={{ alignItems: 'center' }}>
+                        <Text style={{ fontSize: 14, color: '#A68C7B', fontWeight: '600', marginTop: 4 }}>
+                          {descriptionExpanded ? 'View Less' : 'View More'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+
+                {/* Date and time */}
+                {!!selectedArt?.timestamp && (
+                  <Text style={{ fontSize: 12, color: '#888', marginTop: 8 }}>{selectedArt.timestamp}</Text>
+                )}
 
                 <View style={{ height: 1, backgroundColor: '#eee', marginVertical: 10 }} />
+                
+                {/* Comments Section - Nested ScrollView */}
+                <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 10 }}>Comments</Text>
                 <ScrollView
-                  style={{ maxHeight: 220 }}
+                  style={{ maxHeight: 120 }}
                   keyboardShouldPersistTaps="handled"
                   decelerationRate={Platform.OS === 'ios' ? 'fast' : 0.98}
                   scrollEventThrottle={16}
                   showsVerticalScrollIndicator
+                  nestedScrollEnabled
                 >
                   {(artComments || []).map((c) => (
                     <View key={c.id} style={{ flexDirection: 'row', marginBottom: 10 }}>
@@ -663,6 +1012,84 @@ export default function ProfileScreen() {
             </ScrollView>
           </View>
         </View>
+      </Modal>
+
+      {/* Edit Artwork Modal */}
+      <Modal
+        visible={editModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setEditModalVisible(false)}
+      >
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <View style={styles.uploadModalOverlay}>
+            <View style={styles.uploadModalContent}>
+              <View style={styles.uploadModalHeader}>
+                <Text style={styles.uploadModalTitle}>Edit Artwork</Text>
+                <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                  <Ionicons name="close" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.uploadModalBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                {/* Image Picker */}
+                <TouchableOpacity style={styles.uploadImagePicker} onPress={pickEditArtworkImage}>
+                  {editArtImage ? (
+                    <Image source={editArtImage} style={styles.uploadPickedImage} />
+                  ) : (
+                    <View style={styles.uploadImagePlaceholder}>
+                      <Ionicons name="image-outline" size={48} color="#A68C7B" />
+                      <Text style={styles.uploadImageText}>{editingArt ? 'Tap to change image (keep current or select new)' : 'Tap to select image'}</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                {/* Title Input */}
+                <Text style={styles.uploadInputLabel}>Title *</Text>
+                <TextInput
+                  style={styles.uploadInput}
+                  placeholder="Enter artwork title"
+                  value={editArtTitle}
+                  onChangeText={setEditArtTitle}
+                />
+
+                {/* Medium Input */}
+                <Text style={styles.uploadInputLabel}>Medium</Text>
+                <TextInput
+                  style={styles.uploadInput}
+                  placeholder="e.g., Oil, Digital, Watercolor"
+                  value={editArtMedium}
+                  onChangeText={setEditArtMedium}
+                />
+
+                {/* Description Input */}
+                <Text style={styles.uploadInputLabel}>Description</Text>
+                <TextInput
+                  style={[styles.uploadInput, styles.uploadTextArea]}
+                  placeholder="Enter description"
+                  value={editArtDescription}
+                  onChangeText={setEditArtDescription}
+                  multiline
+                  numberOfLines={4}
+                />
+
+                {/* Update Button */}
+                <TouchableOpacity
+                  style={[styles.uploadButton, editArtUploading && styles.uploadButtonDisabled]}
+                  onPress={submitEditArtwork}
+                  disabled={editArtUploading}
+                >
+                  <Text style={styles.uploadButtonText}>
+                    {editArtUploading ? 'Updating...' : 'Update Artwork'}
+                  </Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={artModalVisible} animationType="slide" transparent presentationStyle="overFullScreen" onRequestClose={() => setArtModalVisible(false)}>
@@ -724,8 +1151,27 @@ const styles = StyleSheet.create({
     width: "90%",
   },
   sectionTitle: { fontSize: 18, fontWeight: "bold", marginHorizontal: 15, marginTop: 25, marginBottom: 10 },
+  artworkHeaderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 15,
+    marginTop: 25,
+    marginBottom: 10,
+  },
+  artworkBadge: {
+    backgroundColor: '#A68C7B',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginLeft: 8,
+  },
+  artworkBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   galleryRow: { flexDirection: "row", paddingHorizontal: 10 },
-  galleryItem: { width: 100, height: 100, borderRadius: 10, marginRight: 10 },
+  galleryItem: { width: 100, height: 100, borderRadius: 10 },
   artworkPreview: { width: 120, height: 120, borderRadius: 12, backgroundColor: '#f0f0f0' },
   addImageText: { fontSize: 32, color: "#999" },
   fullScreenContainer: { flex: 1, backgroundColor: "rgba(0,0,0,0.9)", justifyContent: "center", alignItems: "center" },
@@ -755,5 +1201,94 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,
+  },
+  // Edit modal styles
+  uploadModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  uploadModalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+  },
+  uploadModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  uploadModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#A68C7B',
+  },
+  uploadModalBody: {
+    padding: 20,
+  },
+  uploadImagePicker: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#A68C7B',
+    borderStyle: 'dashed',
+    marginBottom: 20,
+    overflow: 'hidden',
+  },
+  uploadImagePlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f9f9f9',
+  },
+  uploadImageText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: '#A68C7B',
+  },
+  uploadPickedImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  uploadInputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  uploadInput: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    marginBottom: 16,
+    backgroundColor: '#fff',
+  },
+  uploadTextArea: {
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  uploadButton: {
+    backgroundColor: '#A68C7B',
+    paddingVertical: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  uploadButtonDisabled: {
+    opacity: 0.6,
+  },
+  uploadButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
