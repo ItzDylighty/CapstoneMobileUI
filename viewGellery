@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, ScrollView, TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Alert, RefreshControl } from 'react-native';
+import { StyleSheet, View, Text, SafeAreaView, Image, TouchableOpacity, ScrollView, TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Alert, RefreshControl, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import Icon from 'react-native-vector-icons/FontAwesome';
+import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from "../../supabase/supabaseClient";
 import Header from '../components/Header';
@@ -21,13 +23,219 @@ const ViewGalleryScreen = () => {
   const [viewCount, setViewCount] = useState(0);
   const [zoomImage, setZoomImage] = useState(null);
   const [submittingComment, setSubmittingComment] = useState(false);
+  const [artMenuVisible, setArtMenuVisible] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [role, setRole] = useState(null);
+  
+  // Edit modal states
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editMedium, setEditMedium] = useState('');
+  const [editCategories, setEditCategories] = useState([]);
+  const [existingImages, setExistingImages] = useState([]);
+  const [newImages, setNewImages] = useState([]);
+  const [imagesToRemove, setImagesToRemove] = useState([]);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  
+  const categories = [
+    'Classical Art', 'Abstract Art', 'Impressionist', 'Contemporary Art',
+    'Digital Art', 'Photography', 'Sculpture', 'Street Art', 'Landscape',
+    'Portrait', 'Surrealist', 'Minimalist', 'Expressionist', 'Realism', 'Conceptual'
+  ];
 
   const loadSession = async () => {
     const { data } = await supabase.auth.getSession();
+    const userId = data?.session?.user?.id || null;
+    if (userId && !currentUserId) setCurrentUserId(userId);
     return {
       at: data?.session?.access_token || null,
       rt: data?.session?.refresh_token || null,
     };
+  };
+
+  const fetchRole = async () => {
+    try {
+      const { at, rt } = await loadSession();
+      const res = await fetch(`${API_BASE}/users/role`, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { Cookie: `access_token=${at}; refresh_token=${rt}` },
+      });
+      if (!res.ok) return null;
+      const bodyText = await res.text();
+      let data = null;
+      try { data = bodyText ? JSON.parse(bodyText) : null; } catch (_) { data = bodyText; }
+      const resolvedRole = typeof data === 'string' ? data : (data?.role || data?.user?.role || null);
+      setRole(resolvedRole);
+      return resolvedRole;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleEditArtwork = () => {
+    setArtMenuVisible(false);
+    if (!artwork) return;
+    
+    // Prepare existing images
+    const artworkImages = artwork.image || [];
+    const imageArray = Array.isArray(artworkImages) ? artworkImages : (artworkImages ? [artworkImages] : []);
+    const resolvedImages = imageArray.map(img => resolveImageUrl(img));
+    
+    // Initialize edit form
+    setEditTitle(artwork.title || '');
+    setEditDescription(artwork.description || '');
+    setEditMedium(artwork.medium || '');
+    setEditCategories(artwork.categories || []);
+    setExistingImages(resolvedImages);
+    setNewImages([]);
+    setImagesToRemove([]);
+    setEditModalVisible(true);
+  };
+  
+  const handleCategoryToggle = (category) => {
+    setEditCategories(prev => 
+      prev.includes(category)
+        ? prev.filter(cat => cat !== category)
+        : [...prev, category]
+    );
+  };
+  
+  const pickNewImages = async () => {
+    const totalImages = existingImages.length + newImages.length;
+    if (totalImages >= 5) {
+      Alert.alert('Limit Reached', 'Maximum 5 images allowed');
+      return;
+    }
+    
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true,
+      quality: 1,
+    });
+    
+    if (!result.canceled) {
+      const remainingSlots = 5 - totalImages;
+      const selectedImages = result.assets.slice(0, remainingSlots);
+      setNewImages(prev => [...prev, ...selectedImages.map(asset => ({
+        uri: asset.uri,
+        id: Date.now() + Math.random()
+      }))]);
+    }
+  };
+  
+  const removeExistingImage = (imageUrl) => {
+    setExistingImages(prev => prev.filter(img => img !== imageUrl));
+    setImagesToRemove(prev => [...prev, imageUrl]);
+  };
+  
+  const removeNewImage = (imageId) => {
+    setNewImages(prev => prev.filter(img => img.id !== imageId));
+  };
+  
+  const submitEditArtwork = async () => {
+    if (!editTitle.trim()) {
+      Alert.alert('Error', 'Title is required');
+      return;
+    }
+    if (!editDescription.trim()) {
+      Alert.alert('Error', 'Description is required');
+      return;
+    }
+    if (!editMedium.trim()) {
+      Alert.alert('Error', 'Medium is required');
+      return;
+    }
+    if (editCategories.length === 0) {
+      Alert.alert('Error', 'Please select at least one category');
+      return;
+    }
+    if (existingImages.length === 0 && newImages.length === 0) {
+      Alert.alert('Error', 'Please keep at least one image or upload new ones');
+      return;
+    }
+    
+    setEditSubmitting(true);
+    try {
+      const { at, rt } = await loadSession();
+      const formData = new FormData();
+      
+      formData.append('title', editTitle);
+      formData.append('description', editDescription);
+      formData.append('medium', editMedium);
+      formData.append('categories', JSON.stringify(editCategories));
+      
+      // Add existing images
+      existingImages.forEach(imageUrl => {
+        formData.append('existingImages', imageUrl);
+      });
+      
+      // Add new images
+      newImages.forEach(imageObj => {
+        formData.append('images', {
+          uri: imageObj.uri,
+          name: 'artwork.jpg',
+          type: 'image/jpeg',
+        });
+      });
+      
+      // Add images to remove
+      imagesToRemove.forEach(imageUrl => {
+        formData.append('imagesToRemove', imageUrl);
+      });
+      
+      const res = await fetch(`${API_BASE}/gallery/artwork/${artwork.id}`, {
+        method: 'PUT',
+        headers: {
+          Cookie: `access_token=${at}; refresh_token=${rt}`,
+        },
+        body: formData,
+      });
+      
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || 'Update failed');
+      }
+      
+      Alert.alert('Success', 'Artwork updated successfully!');
+      setEditModalVisible(false);
+      await fetchArtworkDetails();
+    } catch (err) {
+      console.error('Edit artwork error:', err);
+      Alert.alert('Error', err.message || 'Failed to update artwork');
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  const handleDeleteArtwork = () => {
+    setArtMenuVisible(false);
+    Alert.alert(
+      'Delete Artwork',
+      'Are you sure you want to delete this artwork?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { at, rt } = await loadSession();
+              const res = await fetch(`${API_BASE}/gallery/artwork/${artwork.id}`, {
+                method: 'DELETE',
+                headers: { Cookie: `access_token=${at}; refresh_token=${rt}` },
+              });
+              if (!res.ok) throw new Error('Delete failed');
+              Alert.alert('Success', 'Artwork deleted successfully');
+              router.back();
+            } catch (err) {
+              Alert.alert('Error', 'Failed to delete artwork');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const fetchArtworkDetails = async () => {
@@ -177,6 +385,7 @@ const ViewGalleryScreen = () => {
     if (artworkId) {
       fetchArtworkDetails();
       fetchComments();
+      fetchRole();
     } else {
       setLoading(false);
       Alert.alert('Error', 'No artwork ID provided');
@@ -349,9 +558,48 @@ const ViewGalleryScreen = () => {
             />
           </TouchableOpacity>
 
-          {/* Title and Artist */}
+          {/* Title, Artist, and Menu */}
           <View style={styles.section}>
-            <Text style={styles.artworkTitle}>{artwork.title || 'Untitled'}</Text>
+            {/* Row 1: Title and Menu */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text style={styles.artworkTitle}>{artwork.title || 'Untitled'}</Text>
+              
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                {/* Three-dot Menu - show only for artwork owner or admin */}
+                {currentUserId && (currentUserId === artwork.userId || role === 'admin') && (
+                  <View style={{ position: 'relative' }}>
+                    <TouchableOpacity 
+                      onPress={() => setArtMenuVisible(!artMenuVisible)}
+                      style={{ padding: 8 }}
+                    >
+                      <Ionicons name="ellipsis-horizontal" size={24} color="#555" />
+                    </TouchableOpacity>
+                    
+                    {/* Dropdown menu */}
+                    {artMenuVisible && (
+                      <View style={styles.dropdownMenu}>
+                        <TouchableOpacity 
+                          style={styles.menuItem}
+                          onPress={handleEditArtwork}
+                        >
+                          <Ionicons name="pencil-outline" size={18} color="#555" />
+                          <Text style={styles.menuItemText}>Edit</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                          style={[styles.menuItem, { borderTopWidth: 1, borderTopColor: '#eee' }]}
+                          onPress={handleDeleteArtwork}
+                        >
+                          <Ionicons name="trash-outline" size={18} color="#d9534f" />
+                          <Text style={[styles.menuItemText, { color: '#d9534f' }]}>Delete</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                )}
+              </View>
+            </View>
+            
+            {/* Row 2: By Artist */}
             <Text style={styles.artistName}>by {artwork.artist || 'Unknown Artist'}</Text>
           </View>
 
@@ -452,6 +700,139 @@ const ViewGalleryScreen = () => {
         <TouchableOpacity style={styles.fullScreenContainer} onPress={() => setZoomImage(null)}>
           <Image source={zoomImage} style={styles.fullScreenImage} resizeMode="contain" />
         </TouchableOpacity>
+      </Modal>
+
+      {/* Edit Artwork Modal */}
+      <Modal
+        visible={editModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setEditModalVisible(false)}
+      >
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <View style={styles.editModalOverlay}>
+            <View style={styles.editModalContent}>
+              {/* Header */}
+              <View style={styles.editModalHeader}>
+                <Text style={styles.editModalTitle}>Edit Artwork</Text>
+                <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                  <Ionicons name="close" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.editModalBody} showsVerticalScrollIndicator={false}>
+                {/* Images Section */}
+                <View style={{ marginBottom: 20 }}>
+                  <Text style={styles.editLabel}>Images (Max 5)</Text>
+                  
+                  {/* Image Grid */}
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                    {/* Existing Images */}
+                    {existingImages.map((imageUrl, index) => (
+                      <View key={`existing-${index}`} style={styles.editImagePreview}>
+                        <Image source={{ uri: imageUrl }} style={styles.editImagePreviewImage} />
+                        <TouchableOpacity 
+                          onPress={() => removeExistingImage(imageUrl)}
+                          style={styles.editImageRemoveBtn}
+                        >
+                          <Ionicons name="close-circle" size={24} color="#d9534f" />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                    
+                    {/* New Images */}
+                    {newImages.map((imageObj) => (
+                      <View key={imageObj.id} style={styles.editImagePreview}>
+                        <Image source={{ uri: imageObj.uri }} style={styles.editImagePreviewImage} />
+                        <TouchableOpacity 
+                          onPress={() => removeNewImage(imageObj.id)}
+                          style={styles.editImageRemoveBtn}
+                        >
+                          <Ionicons name="close-circle" size={24} color="#d9534f" />
+                        </TouchableOpacity>
+                        <View style={styles.editImageNewBadge}>
+                          <Text style={{ color: '#fff', fontSize: 10 }}>NEW</Text>
+                        </View>
+                      </View>
+                    ))}
+                    
+                    {/* Add Image Button */}
+                    {(existingImages.length + newImages.length) < 5 && (
+                      <TouchableOpacity onPress={pickNewImages} style={styles.editAddImageBtn}>
+                        <Ionicons name="add" size={32} color="#A68C7B" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+
+                {/* Title Input */}
+                <Text style={styles.editLabel}>Title *</Text>
+                <TextInput
+                  style={styles.editInput}
+                  placeholder="Enter artwork title"
+                  value={editTitle}
+                  onChangeText={setEditTitle}
+                />
+
+                {/* Medium Input */}
+                <Text style={styles.editLabel}>Medium *</Text>
+                <TextInput
+                  style={styles.editInput}
+                  placeholder="e.g., Oil on Canvas, Digital Art"
+                  value={editMedium}
+                  onChangeText={setEditMedium}
+                />
+
+                {/* Description Input */}
+                <Text style={styles.editLabel}>Description *</Text>
+                <TextInput
+                  style={[styles.editInput, styles.editTextArea]}
+                  placeholder="Describe your artwork..."
+                  value={editDescription}
+                  onChangeText={setEditDescription}
+                  multiline
+                  numberOfLines={4}
+                />
+
+                {/* Categories */}
+                <Text style={styles.editLabel}>Categories *</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+                  {categories.map(category => (
+                    <TouchableOpacity
+                      key={category}
+                      onPress={() => handleCategoryToggle(category)}
+                      style={[
+                        styles.editCategoryBtn,
+                        editCategories.includes(category) && styles.editCategoryBtnActive
+                      ]}
+                    >
+                      <Text style={[
+                        styles.editCategoryBtnText,
+                        editCategories.includes(category) && styles.editCategoryBtnTextActive
+                      ]}>
+                        {category}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Update Button */}
+                <TouchableOpacity
+                  style={[styles.editSubmitBtn, editSubmitting && { opacity: 0.6 }]}
+                  onPress={submitEditArtwork}
+                  disabled={editSubmitting}
+                >
+                  <Text style={styles.editSubmitBtnText}>
+                    {editSubmitting ? 'Updating...' : 'Update Artwork'}
+                  </Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -649,6 +1030,153 @@ const styles = StyleSheet.create({
   fullScreenImage: {
     width: '100%',
     height: '100%',
+  },
+  dropdownMenu: {
+    position: 'absolute',
+    top: 40,
+    right: 0,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingVertical: 4,
+    minWidth: 120,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    zIndex: 1000,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  menuItemText: {
+    marginLeft: 12,
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#555',
+  },
+  // Edit Modal Styles
+  editModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  editModalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+    minHeight: '70%',
+  },
+  editModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  editModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  editModalBody: {
+    padding: 20,
+  },
+  editLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+    marginTop: 12,
+  },
+  editInput: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 15,
+    color: '#333',
+    marginBottom: 16,
+  },
+  editTextArea: {
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  editImagePreview: {
+    width: 90,
+    height: 90,
+    borderRadius: 8,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  editImagePreviewImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  editImageRemoveBtn: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: 12,
+  },
+  editImageNewBadge: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    backgroundColor: '#A68C7B',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  editAddImageBtn: {
+    width: 90,
+    height: 90,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#A68C7B',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fafafa',
+  },
+  editCategoryBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#A68C7B',
+    backgroundColor: '#fff',
+  },
+  editCategoryBtnActive: {
+    backgroundColor: '#A68C7B',
+  },
+  editCategoryBtnText: {
+    fontSize: 13,
+    color: '#A68C7B',
+    fontWeight: '500',
+  },
+  editCategoryBtnTextActive: {
+    color: '#fff',
+  },
+  editSubmitBtn: {
+    backgroundColor: '#A68C7B',
+    paddingVertical: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  editSubmitBtnText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 
