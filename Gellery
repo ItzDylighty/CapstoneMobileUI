@@ -31,6 +31,9 @@ const GalleryScreen = () => {
   });
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [userPreferences, setUserPreferences] = useState([]);
+  const [recentlyAddedPage, setRecentlyAddedPage] = useState(0);
+  const [curatedPage, setCuratedPage] = useState(0);
+  const itemsPerPage = 6;
 
   const loadSession = async () => {
     const { data } = await supabase.auth.getSession();
@@ -66,7 +69,7 @@ const GalleryScreen = () => {
         queryParams.append('categories', categoryFilter);
       }
       queryParams.append('page', '1');
-      queryParams.append('limit', '50');
+      queryParams.append('limit', '100');
       
       const res = await fetch(`${API_BASE}/gallery/artworks?${queryParams}`, {
         method: 'GET',
@@ -76,15 +79,16 @@ const GalleryScreen = () => {
       const data = await res.json();
       
       if (data.success && data.artworks) {
-        // Curated Collection: Featured artworks first
-        const featured = data.artworks.filter(art => art.featured === true).slice(0, 6);
-        setCuratedArtworks(featured.length > 0 ? featured : data.artworks.slice(0, 6));
+        // Curated Collection: Featured artworks first, then remaining artworks
+        const featured = data.artworks.filter(art => art.featured === true);
+        const nonFeatured = data.artworks.filter(art => art.featured !== true);
+        setCuratedArtworks(featured.length > 0 ? [...featured, ...nonFeatured] : data.artworks);
         
         // Recently Added: Latest artworks (using datePosted from controller)
         const sorted = [...data.artworks].sort((a, b) => 
           new Date(b.datePosted || 0) - new Date(a.datePosted || 0)
         );
-        setRecentlyAdded(sorted.slice(0, 6));
+        setRecentlyAdded(sorted);
         
         // Store total count
         setTotalArtworks(data.totalCount || data.artworks.length);
@@ -141,6 +145,9 @@ const GalleryScreen = () => {
   const handleCategoryChange = (categoryField, categoryName) => {
     setSelectedCategory(categoryField);
     setLoading(true);
+    // Reset pagination when changing categories
+    setRecentlyAddedPage(0);
+    setCuratedPage(0);
     // If "All" is selected, send 'all', otherwise send the category name
     const filterValue = categoryField === 'all' ? 'all' : categoryName;
     fetchArtworks(filterValue);
@@ -148,6 +155,9 @@ const GalleryScreen = () => {
 
   const onRefresh = async () => {
     setRefreshing(true);
+    // Reset pagination on refresh
+    setRecentlyAddedPage(0);
+    setCuratedPage(0);
     try {
       await Promise.all([
         fetchCategories(),
@@ -311,7 +321,9 @@ const GalleryScreen = () => {
       >
         {/* Filter Collection (Categories) */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Filter Collection</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Filter Collection</Text>
+          </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
             {categories.map((category) => {
               const isPreferred = userPreferences.includes(category.field) || userPreferences.includes(category.name);
@@ -367,23 +379,121 @@ const GalleryScreen = () => {
                 {/* Recently Added */}
                 {recentlyAdded.length > 0 && (
                   <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Recently Added</Text>
-                    <View style={styles.cardGrid}>
-                      {recentlyAdded.map(renderArtworkCard)}
+                    <View style={styles.sectionHeader}>
+                      <Text style={styles.sectionTitle}>Recently Added</Text>
+                      <Text style={styles.sectionCount}>
+                        {Math.min((recentlyAddedPage + 1) * itemsPerPage, recentlyAdded.length)} of {recentlyAdded.length}
+                      </Text>
                     </View>
+                    <View style={styles.cardGrid}>
+                      {recentlyAdded
+                        .slice(recentlyAddedPage * itemsPerPage, (recentlyAddedPage + 1) * itemsPerPage)
+                        .map(renderArtworkCard)}
+                    </View>
+                    {recentlyAdded.length > itemsPerPage && (
+                      <View style={styles.paginationContainer}>
+                        <TouchableOpacity
+                          style={[styles.paginationButton, recentlyAddedPage === 0 && styles.paginationButtonDisabled]}
+                          onPress={() => setRecentlyAddedPage(prev => Math.max(0, prev - 1))}
+                          disabled={recentlyAddedPage === 0}
+                        >
+                          <Ionicons name="chevron-back" size={20} color={recentlyAddedPage === 0 ? '#ccc' : '#A68C7B'} />
+                        </TouchableOpacity>
+                        <View style={styles.paginationDots}>
+                          {Array.from({ length: Math.ceil(recentlyAdded.length / itemsPerPage) }).map((_, index) => (
+                            <View
+                              key={index}
+                              style={[
+                                styles.paginationDot,
+                                index === recentlyAddedPage && styles.paginationDotActive
+                              ]}
+                            />
+                          ))}
+                        </View>
+                        <TouchableOpacity
+                          style={[
+                            styles.paginationButton,
+                            recentlyAddedPage >= Math.ceil(recentlyAdded.length / itemsPerPage) - 1 && styles.paginationButtonDisabled
+                          ]}
+                          onPress={() => setRecentlyAddedPage(prev => 
+                            Math.min(Math.ceil(recentlyAdded.length / itemsPerPage) - 1, prev + 1)
+                          )}
+                          disabled={recentlyAddedPage >= Math.ceil(recentlyAdded.length / itemsPerPage) - 1}
+                        >
+                          <Ionicons 
+                            name="chevron-forward" 
+                            size={20} 
+                            color={recentlyAddedPage >= Math.ceil(recentlyAdded.length / itemsPerPage) - 1 ? '#ccc' : '#A68C7B'} 
+                          />
+                        </TouchableOpacity>
+                      </View>
+                    )}
                   </View>
                 )}
 
                 {/* Curated Collection */}
                 {curatedArtworks.length > 0 && (
                   <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Curated Collection</Text>
-                    <View style={styles.cardGrid}>
-                      {curatedArtworks.map(renderArtworkCard)}
+                    <View style={styles.sectionHeader}>
+                      <Text style={styles.sectionTitle}>Curated Collection</Text>
+                      <Text style={styles.sectionCount}>
+                        {Math.min((curatedPage + 1) * itemsPerPage, curatedArtworks.length)} of {curatedArtworks.length}
+                      </Text>
                     </View>
+                    <View style={styles.cardGrid}>
+                      {curatedArtworks
+                        .slice(curatedPage * itemsPerPage, (curatedPage + 1) * itemsPerPage)
+                        .map(renderArtworkCard)}
+                    </View>
+                    {curatedArtworks.length > itemsPerPage && (
+                      <View style={styles.paginationContainer}>
+                        <TouchableOpacity
+                          style={[styles.paginationButton, curatedPage === 0 && styles.paginationButtonDisabled]}
+                          onPress={() => setCuratedPage(prev => Math.max(0, prev - 1))}
+                          disabled={curatedPage === 0}
+                        >
+                          <Ionicons name="chevron-back" size={20} color={curatedPage === 0 ? '#ccc' : '#A68C7B'} />
+                        </TouchableOpacity>
+                        <View style={styles.paginationDots}>
+                          {Array.from({ length: Math.ceil(curatedArtworks.length / itemsPerPage) }).map((_, index) => (
+                            <View
+                              key={index}
+                              style={[
+                                styles.paginationDot,
+                                index === curatedPage && styles.paginationDotActive
+                              ]}
+                            />
+                          ))}
+                        </View>
+                        <TouchableOpacity
+                          style={[
+                            styles.paginationButton,
+                            curatedPage >= Math.ceil(curatedArtworks.length / itemsPerPage) - 1 && styles.paginationButtonDisabled
+                          ]}
+                          onPress={() => setCuratedPage(prev => 
+                            Math.min(Math.ceil(curatedArtworks.length / itemsPerPage) - 1, prev + 1)
+                          )}
+                          disabled={curatedPage >= Math.ceil(curatedArtworks.length / itemsPerPage) - 1}
+                        >
+                          <Ionicons 
+                            name="chevron-forward" 
+                            size={20} 
+                            color={curatedPage >= Math.ceil(curatedArtworks.length / itemsPerPage) - 1 ? '#ccc' : '#A68C7B'} 
+                          />
+                        </TouchableOpacity>
+                      </View>
+                    )}
                   </View>
                 )}
                 
+                {/* Gallery Collection Info */}
+                <View style={styles.galleryHeader}>
+                  <Text style={styles.galleryHeaderTitle}>Gallery Collection</Text>
+                  <Text style={styles.galleryHeaderDescription}>
+                    Featuring {totalArtworks} carefully curated masterpieces spanning multiple centuries and artistic movements. Each piece represents a significant moment in art history, from classical Renaissance works to modern abstract expressions.
+                  </Text>
+                </View>
+
                 {/* End of Collection Message */}
                 <View style={styles.dividerContainer}>
                   <View style={styles.dividerLine} />
@@ -529,19 +639,49 @@ const GalleryScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
+  galleryHeader: {
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  galleryHeaderTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#A68C7B',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  galleryHeaderDescription: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 22,
+    paddingHorizontal: 10,
+  },
   section: {
     marginBottom: 20,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginHorizontal: 15,
+    marginTop: 15,
+    marginBottom: 10,
   },
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    marginHorizontal: 15,
-    marginTop: 15,
-    marginBottom: 10,
     color: '#A68C7B',
   },
+  sectionCount: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '600',
+  },
   filterScroll: {
-    marginHorizontal: 15,
+    paddingHorizontal: 15,
   },
   filterChip: {
     flexDirection: 'row',
@@ -804,6 +944,47 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
   },
+  paginationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 15,
+    marginBottom: 10,
+    paddingHorizontal: 15,
+  },
+  paginationButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  paginationButtonDisabled: {
+    backgroundColor: '#fafafa',
+    borderColor: '#f0f0f0',
+  },
+  paginationDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 15,
+  },
+  paginationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#e0e0e0',
+    marginHorizontal: 4,
+  },
+  paginationDotActive: {
+    backgroundColor: '#A68C7B',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
 });
 
 export default GalleryScreen;
+
