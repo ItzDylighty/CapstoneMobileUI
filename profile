@@ -74,6 +74,7 @@ export default function ProfileScreen() {
   // Comments modal state
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
   const [commentingArt, setCommentingArt] = useState(null); // Store which art we're commenting on
+  const [artMenuVisible, setArtMenuVisible] = useState(false); // For artwork edit/delete menu
   
   // Open comments modal - close artwork modal first
   const openCommentsModal = async () => {
@@ -1345,38 +1346,60 @@ export default function ProfileScreen() {
             >
               <View style={{ padding: 12 }}>
                 
-                {/* Row 1: Username and Heart */}
+                {/* Row 1: Username, Heart, and Menu */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <Text style={{ fontSize: 18, fontWeight: 'bold' }}>{username || 'Artist'}</Text>
-                  <TouchableOpacity onPress={handleToggleArtLike} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#f5f5f5', borderRadius: 20 }}>
-                    <Icon name={artUserLiked ? 'heart' : 'heart-o'} size={22} color={artUserLiked ? 'red' : '#555'} />
-                    <Text style={{ marginLeft: 8, fontWeight: '600' }}>{artLikesCount}</Text>
-                  </TouchableOpacity>
+                  
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    {/* Heart/Like Button */}
+                    <TouchableOpacity onPress={handleToggleArtLike} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#f5f5f5', borderRadius: 20 }}>
+                      <Icon name={artUserLiked ? 'heart' : 'heart-o'} size={22} color={artUserLiked ? 'red' : '#555'} />
+                      <Text style={{ marginLeft: 8, fontWeight: '600' }}>{artLikesCount}</Text>
+                    </TouchableOpacity>
+                    
+                    {/* Three-dot Menu for Edit/Delete */}
+                    <View style={{ position: 'relative' }}>
+                      <TouchableOpacity 
+                        onPress={() => setArtMenuVisible(!artMenuVisible)}
+                        style={{ padding: 8 }}
+                      >
+                        <Ionicons name="ellipsis-horizontal" size={24} color="#555" />
+                      </TouchableOpacity>
+                      
+                      {/* Dropdown menu */}
+                      {artMenuVisible && (
+                        <View style={styles.dropdownMenu}>
+                          <TouchableOpacity 
+                            style={styles.menuItem}
+                            onPress={() => {
+                              setArtMenuVisible(false);
+                              handleEditArtwork(selectedArt);
+                            }}
+                          >
+                            <Ionicons name="pencil-outline" size={18} color="#555" />
+                            <Text style={styles.menuItemText}>Edit</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity 
+                            style={[styles.menuItem, { borderTopWidth: 1, borderTopColor: '#eee' }]}
+                            onPress={() => {
+                              setArtMenuVisible(false);
+                              handleDeleteArtwork(selectedArt);
+                            }}
+                          >
+                            <Ionicons name="trash-outline" size={18} color="#d9534f" />
+                            <Text style={[styles.menuItemText, { color: '#d9534f' }]}>Delete</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </View>
+                  </View>
                 </View>
 
-                {/* Row 2: By: Fullname and Edit/Delete Buttons */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                {/* Row 2: By: Fullname */}
+                <View style={{ marginBottom: 12 }}>
                   <Text style={{ fontSize: 14, color: '#666' }}>
                     by: {[firstName, middleName, lastName].filter(Boolean).join(' ') || username || 'Unknown'}
                   </Text>
-                  
-                  {/* Edit/Delete buttons for artwork owner */}
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    <TouchableOpacity 
-                      onPress={() => handleEditArtwork(selectedArt)} 
-                      style={{ backgroundColor: '#A68C7B', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 6, flexDirection: 'row', alignItems: 'center' }}
-                    >
-                      <Ionicons name="pencil" size={14} color="#fff" />
-                      <Text style={{ color: '#fff', marginLeft: 6, fontSize: 12, fontWeight: '600' }}>Edit</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      onPress={() => handleDeleteArtwork(selectedArt)} 
-                      style={{ backgroundColor: '#d9534f', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 6, flexDirection: 'row', alignItems: 'center' }}
-                    >
-                      <Ionicons name="trash" size={14} color="#fff" />
-                      <Text style={{ color: '#fff', marginLeft: 6, fontSize: 12, fontWeight: '600' }}>Delete</Text>
-                    </TouchableOpacity>
-                  </View>
                 </View>
 
                 {/* Medium */}
@@ -1817,20 +1840,20 @@ const styles = StyleSheet.create({
   },
   galleryRow: { flexDirection: "row", paddingHorizontal: 10 },
   galleryItem: {
-    width: 100,
-    height: 100,
+    width: 180,
+    height: 150,
     borderRadius: 10,
     marginRight: 10,
   },
   artworkPreview: {
-    width: 120,
-    height: 120,
+    width: 150,
+    height: 150,
     borderRadius: 12,
     backgroundColor: '#f0f0f0',
   },
   addImageBox: {
-    width: 100,
-    height: 100,
+    width: 150,
+    height: 150,
     borderRadius: 10,
     borderWidth: 2,
     borderColor: "#D2AE7E",
@@ -2104,5 +2127,32 @@ const styles = StyleSheet.create({
   emptyCommentsSubtext: {
     fontSize: 14,
     color: '#999',
+  },
+  dropdownMenu: {
+    position: 'absolute',
+    top: 40,
+    right: 0,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingVertical: 4,
+    minWidth: 120,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    zIndex: 1000,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  menuItemText: {
+    marginLeft: 12,
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#555',
   },
 });
